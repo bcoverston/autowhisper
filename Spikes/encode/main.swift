@@ -8,7 +8,7 @@ import AVFoundation
 import Foundation
 
 setvbuf(stdout, nil, _IONBF, 0)
-let outDir = URL(fileURLWithPath: "/Users/bcover/Projects/autowhisper/Spikes/out")
+let outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Spikes/out")
 
 nonisolated func sineBuffer(format: AVAudioFormat, seconds: Double) -> AVAudioPCMBuffer {
     let frames = AVAudioFrameCount(format.sampleRate * seconds)

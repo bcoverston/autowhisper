@@ -5,7 +5,7 @@
 import AppKit
 import SwiftUI
 
-nonisolated let logURL = URL(fileURLWithPath: "/Users/bcover/Projects/autowhisper/Spikes/out/spike-shell.log")
+nonisolated let logURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Spikes/out/spike-shell.log")
 
 @MainActor
 func slog(_ s: String) {

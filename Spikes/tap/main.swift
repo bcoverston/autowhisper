@@ -9,7 +9,7 @@ import CoreAudio
 import Foundation
 
 if CommandLine.arguments.contains("--log") {
-    let logPath = "/Users/bcover/Projects/autowhisper/Spikes/out/spike-tap.log"
+    let logPath = FileManager.default.currentDirectoryPath + "/Spikes/out/spike-tap.log"
     freopen(logPath, "w", stdout)
     freopen(logPath, "a", stderr)
 }
@@ -98,7 +98,7 @@ nonisolated func runSpike() {
     print("aggregate created: \(aggregateID)")
 
     // 4. IOProc: write every input stream to its own WAV (file I/O is fine for a spike).
-    let desktop = URL(fileURLWithPath: "/Users/bcover/Projects/autowhisper/Spikes/out")
+    let desktop = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Spikes/out")
     final class StreamWriter {
         var files: [AVAudioFile] = []
         var formats: [AVAudioFormat] = []

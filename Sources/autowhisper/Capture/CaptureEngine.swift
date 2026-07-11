@@ -155,10 +155,13 @@ final class CaptureEngine: @unchecked Sendable {
                                   elapsed, Double(emittedSamples) / 16000,
                                   Double(dbgSysIn) / controller.sampleRate, controller.sampleRate,
                                   sysPending.count, micPending.count)
-                if let h = FileHandle(forWritingAtPath: "/Users/bcover/Projects/autowhisper/Spikes/out/engine-debug.log") {
+                let log = SessionStore.root.appending(path: "logs/engine-debug.log")
+                try? FileManager.default.createDirectory(at: log.deletingLastPathComponent(),
+                                                         withIntermediateDirectories: true)
+                if let h = FileHandle(forWritingAtPath: log.path) {
                     h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
                 } else {
-                    try? line.data(using: .utf8)!.write(to: URL(fileURLWithPath: "/Users/bcover/Projects/autowhisper/Spikes/out/engine-debug.log"))
+                    try? line.data(using: .utf8)!.write(to: log)
                 }
             }
         }

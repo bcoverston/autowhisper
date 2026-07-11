@@ -30,7 +30,7 @@ nonisolated func loadPCM16k(_ url: URL) -> [Float] {
 
 nonisolated func run() {
     let models = ("~/Library/Application Support/autowhisper/models" as NSString).expandingTildeInPath
-    let wav = URL(fileURLWithPath: "/Users/bcover/Projects/autowhisper/Spikes/out/spike-tap-stream1.wav")
+    let wav = URL(fileURLWithPath: FileManager.default.currentDirectoryPath + "/Spikes/out/spike-tap-stream1.wav")
     let samples = loadPCM16k(wav)
     print("samples: \(samples.count) (\(String(format: "%.1f", Double(samples.count) / 16000))s @16k)")
 
