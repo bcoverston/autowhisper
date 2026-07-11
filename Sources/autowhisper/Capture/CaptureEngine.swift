@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AppKit
 import Events
 import Foundation
 import Synchronization
@@ -25,7 +26,7 @@ final class CaptureEngine: @unchecked Sendable {
     private var sysPending: [Float] = []
     private var micPending: [Float] = []
     private var emittedSamples = 0
-    private var startedAt = DispatchTime.now()
+    private var startedAtNs: UInt64 = 0
     private var levelAccumulator = 0
     private var scratch: [Float] = []
     // --autotest instrumentation
@@ -35,6 +36,13 @@ final class CaptureEngine: @unchecked Sendable {
     private var dbgDrains = 0
 
     private var sinks: [AsyncStream<[Float]>.Continuation] = []
+    private let running = Atomic<Bool>(false)
+
+    // Drain-queue-only rebuild/watchdog state.
+    private var rebuildScheduled = false
+    private var zeroDeliveredSeconds = 0.0
+    private var lastWatchdogRebuildNs: UInt64 = 0
+    private var sleepObservers: [Any] = []
 
     init(hub: EventHub) {
         self.hub = hub
@@ -49,9 +57,12 @@ final class CaptureEngine: @unchecked Sendable {
 
     func start(micOn: Bool) throws {
         try controller.start()
+        running.store(true, ordering: .relaxed)
+        controller.onInvalidated = { [weak self] in self?.scheduleRebuild() }
+        installSleepObservers()
         systemConverter = makeConverter(from: controller.sampleRate)
         scratch = [Float](repeating: 0, count: 1 << 16)
-        startedAt = DispatchTime.now()
+        startedAtNs = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)   // sleep-inclusive
         emittedSamples = 0
         setMicEnabled(micOn)
 
@@ -85,6 +96,9 @@ final class CaptureEngine: @unchecked Sendable {
 
     /// Stops capture, flushes remaining audio, and finishes the PCM streams.
     func stop() {
+        running.store(false, ordering: .relaxed)
+        controller.onInvalidated = nil
+        removeSleepObservers()
         timer?.cancel()
         timer = nil
         controller.stop()
@@ -105,6 +119,7 @@ final class CaptureEngine: @unchecked Sendable {
             systemRMS = rms(count: sysCount)
             sysPending.append(contentsOf: convert(Array(scratch[0..<sysCount]),
                                                   using: &systemConverter, inputRate: controller.sampleRate))
+            watchdog(deliveredZeros: systemRMS == 0, seconds: Double(sysCount) / controller.sampleRate)
         }
         var micRMS: Float = 0
         if micEnabled.load(ordering: .relaxed) {
@@ -122,7 +137,7 @@ final class CaptureEngine: @unchecked Sendable {
 
         // Emit exactly what the wall clock demands, zero-padding starved sources
         // (an idle output device stops the tap's aggregate entirely).
-        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - startedAt.uptimeNanoseconds) / 1e9
+        let elapsed = Double(clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW) - startedAtNs) / 1e9
         let target = Int(elapsed * Self.targetRate)
         let n = min(max(0, target - emittedSamples), Int(Self.targetRate))   // ≤1 s catch-up
         if n > 0 {
@@ -167,6 +182,75 @@ final class CaptureEngine: @unchecked Sendable {
         }
     }
 
+    /// Called from HAL listener queues; debounce onto the drain queue.
+    private func scheduleRebuild() {
+        guard running.load(ordering: .relaxed) else { return }
+        drainQueue.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, !self.rebuildScheduled else { return }
+            self.rebuildScheduled = true
+            self.rebuildNow()
+            self.rebuildScheduled = false
+        }
+    }
+
+    /// Drain-queue only. Tears down and recreates tap + aggregate; the ring is
+    /// stable across rebuilds, stale carry is dropped so old audio can't smear.
+    private func rebuildNow() {
+        guard running.load(ordering: .relaxed) else { return }
+        sysPending.removeAll(keepingCapacity: true)
+        do {
+            try controller.rebuild()
+            hub.emit(.resolved(.tapInvalidated))
+        } catch {
+            hub.emit(.failure(.tapInvalidated, detail: "rebuild: \(error.localizedDescription)"))
+        }
+        hub.emit(.captureState(
+            systemDevice: SystemTapController.deviceName(kAudioHardwarePropertyDefaultOutputDevice),
+            micDevice: SystemTapController.deviceName(kAudioHardwarePropertyDefaultInputDevice),
+            micActive: mic.isRunning))
+    }
+
+    /// Delivered-but-all-zero buffers signal the Bluetooth renegotiation
+    /// failure (or revoked TCC) — an idle device delivers nothing instead.
+    /// One rebuild attempt per 10 min; a second silent stretch raises an issue.
+    private func watchdog(deliveredZeros: Bool, seconds: Double) {
+        guard deliveredZeros else {
+            zeroDeliveredSeconds = 0
+            return
+        }
+        zeroDeliveredSeconds += seconds
+        guard zeroDeliveredSeconds >= 5 else { return }
+        zeroDeliveredSeconds = 0
+        let now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        if now - lastWatchdogRebuildNs > 600 * 1_000_000_000 {
+            lastWatchdogRebuildNs = now
+            rebuildNow()
+        } else {
+            hub.emit(.failure(.tapInvalidated,
+                              detail: "system audio is delivering silence; check Screen & System Audio Recording permission"))
+        }
+    }
+
+    private func installSleepObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        sleepObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { [weak self] _ in
+                guard let self, self.running.load(ordering: .relaxed) else { return }
+                self.drainQueue.async { self.controller.stop() }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: nil) { [weak self] _ in
+                self?.scheduleRebuild()
+            },
+        ]
+    }
+
+    private func removeSleepObservers() {
+        for observer in sleepObservers {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        sleepObservers.removeAll()
+    }
+
     private func rms(count: Int) -> Float {
         var sum: Float = 0
         for i in 0..<count { sum += scratch[i] * scratch[i] }
@@ -184,7 +268,7 @@ final class CaptureEngine: @unchecked Sendable {
 
     private func convert(_ input: [Float], using converter: inout AVAudioConverter?,
                          inputRate: Double) -> [Float] {
-        if converter == nil {
+        if converter == nil || (converter != nil && converter!.inputFormat.sampleRate != inputRate) {
             converter = makeConverter(from: inputRate)
         }
         guard let converter else { return input }   // already 16 kHz
