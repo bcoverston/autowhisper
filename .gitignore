@@ -1,0 +1,6 @@
+.build/
+dist/
+*.xcframework
+.DS_Store
+Spikes/out/
+.deps/

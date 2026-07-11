@@ -1,0 +1,49 @@
+#!/bin/bash
+# Assemble and sign autowhisper.app from the SwiftPM release build.
+# Usage: Scripts/make-app.sh [product]   (default: autowhisper)
+set -euo pipefail
+
+PRODUCT="${1:-autowhisper}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$ROOT/.build/release/$PRODUCT"
+APP="$ROOT/dist/$PRODUCT.app"
+BUNDLE_ID="com.coverston.$PRODUCT"
+
+swift build -c release --package-path "$ROOT" --product "$PRODUCT"
+
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$BIN" "$APP/Contents/MacOS/$PRODUCT"
+
+cat > "$APP/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key><string>$PRODUCT</string>
+    <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+    <key>CFBundleName</key><string>$PRODUCT</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>autowhisper records the microphone to transcribe your sessions.</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>autowhisper records system audio to transcribe your sessions.</string>
+</dict>
+</plist>
+PLIST
+
+# Embedded frameworks (e.g. whisper) must be signed before the outer bundle.
+FRAMEWORKS="$APP/Contents/Frameworks"
+IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}')"
+SIGN=("--force" "--sign" "${IDENTITY:--}")
+if [[ -d "$FRAMEWORKS" ]]; then
+    find "$FRAMEWORKS" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) \
+        -exec codesign "${SIGN[@]}" {} \;
+fi
+codesign "${SIGN[@]}" "$APP"
+
+echo "built: $APP (signed: ${IDENTITY:-ad-hoc})"
