@@ -156,26 +156,37 @@ final class AppModel {
 final class Pipeline: Sendable {
     private let engine: CaptureEngine
     private let archiveTask: Task<Void, Never>
+    private let chunkerTask: Task<Void, Never>
     private let hub: EventHub
     private let id: String
     private let dir: URL
     private let startedAt: Date
 
     static func start(hub: EventHub) async throws -> Pipeline {
+        guard await ModelStore.ensure(.baseEN, hub: hub),
+              await ModelStore.ensure(.vad, hub: hub) else {
+            throw NSError(domain: "autowhisper", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "whisper models unavailable"])
+        }
         let (id, dir) = try SessionStore.createSession()
         let engine = CaptureEngine(hub: hub)
-        try engine.start()
         let archive = try ArchiveWriter(sessionDir: dir, hub: hub)
-        let pcm = engine.pcm
-        let archiveTask = Task { await archive.run(pcm) }
+        let chunker = VADChunker(sessionDir: dir, hub: hub)
+        let archivePCM = engine.makePCMStream()
+        let chunkerPCM = engine.makePCMStream()
+        try engine.start()
+        let archiveTask = Task { await archive.run(archivePCM) }
+        let chunkerTask = Task { await chunker.run(chunkerPCM) }
         hub.emit(.sessionStarted(id: id, dir: dir))
-        return Pipeline(engine: engine, archiveTask: archiveTask, hub: hub, id: id, dir: dir)
+        return Pipeline(engine: engine, archiveTask: archiveTask, chunkerTask: chunkerTask,
+                        hub: hub, id: id, dir: dir)
     }
 
-    private init(engine: CaptureEngine, archiveTask: Task<Void, Never>, hub: EventHub,
-                 id: String, dir: URL) {
+    private init(engine: CaptureEngine, archiveTask: Task<Void, Never>,
+                 chunkerTask: Task<Void, Never>, hub: EventHub, id: String, dir: URL) {
         self.engine = engine
         self.archiveTask = archiveTask
+        self.chunkerTask = chunkerTask
         self.hub = hub
         self.id = id
         self.dir = dir
@@ -183,8 +194,9 @@ final class Pipeline: Sendable {
     }
 
     func stop() async {
-        engine.stop()                  // finishes the PCM stream
+        engine.stop()                  // finishes every PCM stream
         await archiveTask.value        // archive drains + closes last chunk
+        await chunkerTask.value        // chunker flushes + last window transcribed
         SessionStore.finalize(dir: dir, status: .finished)
         hub.emit(.sessionEnded(SessionSummary(
             id: id, dir: dir, startedAt: startedAt, endedAt: .now, status: .finished)))

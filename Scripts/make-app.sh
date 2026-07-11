@@ -36,8 +36,15 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Embedded frameworks (e.g. whisper) must be signed before the outer bundle.
+# Embed whisper.framework when the binary links it.
 FRAMEWORKS="$APP/Contents/Frameworks"
+if otool -L "$BIN" | grep -q "whisper.framework"; then
+    mkdir -p "$FRAMEWORKS"
+    cp -R "$ROOT/.deps/build-apple/whisper.xcframework/macos-arm64_x86_64/whisper.framework" "$FRAMEWORKS/"
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$PRODUCT" 2>/dev/null || true
+fi
+
+# Embedded frameworks must be signed before the outer bundle.
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}')"
 SIGN=("--force" "--sign" "${IDENTITY:--}")
 if [[ -d "$FRAMEWORKS" ]]; then

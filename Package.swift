@@ -8,7 +8,7 @@ let package = Package(
         .target(name: "Events"),
         .executableTarget(
             name: "autowhisper",
-            dependencies: ["Events"],
+            dependencies: ["Events", "whisper"],
             path: "Sources/autowhisper"
         ),
         .executableTarget(name: "spike-tap", path: "Spikes/tap"),

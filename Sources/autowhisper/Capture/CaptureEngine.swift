@@ -20,12 +20,17 @@ final class CaptureEngine: @unchecked Sendable {
     private var levelAccumulator = 0
     private var scratch: [Float] = []
 
-    let pcm: AsyncStream<[Float]>                // mixed 16 kHz mono blocks
-    private let pcmCont: AsyncStream<[Float]>.Continuation
+    private var sinks: [AsyncStream<[Float]>.Continuation] = []
 
     init(hub: EventHub) {
         self.hub = hub
-        (pcm, pcmCont) = AsyncStream.makeStream()
+    }
+
+    /// Register a consumer of the mixed 16 kHz mono PCM. Call before start().
+    func makePCMStream() -> AsyncStream<[Float]> {
+        let (stream, cont) = AsyncStream<[Float]>.makeStream()
+        sinks.append(cont)
+        return stream
     }
 
     func start() throws {
@@ -55,7 +60,7 @@ final class CaptureEngine: @unchecked Sendable {
         controller.stop()
         drainQueue.sync { [self] in
             drain()
-            pcmCont.finish()
+            for sink in sinks { sink.finish() }
         }
     }
 
@@ -100,7 +105,7 @@ final class CaptureEngine: @unchecked Sendable {
             for i in 0..<n { mixed[i] = max(-1, min(1, pending[0][i] + pending[1][i])) }
             pending[0].removeFirst(n)
             pending[1].removeFirst(n)
-            pcmCont.yield(mixed)
+            for sink in sinks { sink.yield(mixed) }
         }
 
         // Levels at 10 Hz (every other 50 ms drain).
