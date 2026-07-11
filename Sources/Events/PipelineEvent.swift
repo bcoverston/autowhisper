@@ -94,6 +94,7 @@ public enum PipelineEvent: Sendable {
     case windowCut                              // VAD window handed to transcriber
     case draftSegments([DraftSegment])          // one VAD window's batch, post-JSONL-append
     case rechecked(ids: [Int])                  // after recheck.jsonl append
+    case correctionApplied([Int: String])       // segment id → corrected text, post-jsonl-append
     case correction(CorrectionState)
     case transcriptWritten(URL)
     case sessionEnded(SessionSummary)           // from the last stage to finish

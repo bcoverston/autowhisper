@@ -9,6 +9,8 @@ actor WhisperTranscriber {
 
     static let flagAvgP: Float = 0.6
     static let flagNoSpeech: Float = 0.5
+    /// --flag-all: test hook forcing every segment through the re-check path.
+    private static let flagAll = CommandLine.arguments.contains("--flag-all")
 
     private var ctx: OpaquePointer?
 
@@ -67,7 +69,7 @@ actor WhisperTranscriber {
                 text: text,
                 avg_p: avgP,
                 no_speech_prob: noSpeech,
-                flagged: avgP < Self.flagAvgP || noSpeech > Self.flagNoSpeech))
+                flagged: Self.flagAll || avgP < Self.flagAvgP || noSpeech > Self.flagNoSpeech))
         }
         return segments
     }

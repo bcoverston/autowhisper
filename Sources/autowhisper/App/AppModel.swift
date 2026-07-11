@@ -125,6 +125,9 @@ final class AppModel {
         case .rechecked(let ids):
             live?.recheckedIDs.formUnion(ids)
 
+        case .correctionApplied(let map):
+            live?.corrections.merge(map) { _, new in new }
+
         case .correction(let state):
             live?.correctionState = state
 
@@ -157,6 +160,7 @@ final class Pipeline: Sendable {
     private let engine: CaptureEngine
     private let archiveTask: Task<Void, Never>
     private let chunkerTask: Task<Void, Never>
+    private let orchestrator: CorrectionOrchestrator
     private let hub: EventHub
     private let id: String
     private let dir: URL
@@ -171,7 +175,8 @@ final class Pipeline: Sendable {
         let (id, dir) = try SessionStore.createSession()
         let engine = CaptureEngine(hub: hub)
         let archive = try ArchiveWriter(sessionDir: dir, hub: hub)
-        let chunker = VADChunker(sessionDir: dir, hub: hub)
+        let orchestrator = CorrectionOrchestrator(sessionDir: dir, hub: hub)
+        let chunker = VADChunker(sessionDir: dir, hub: hub, orchestrator: orchestrator)
         let archivePCM = engine.makePCMStream()
         let chunkerPCM = engine.makePCMStream()
         try engine.start()
@@ -179,14 +184,16 @@ final class Pipeline: Sendable {
         let chunkerTask = Task { await chunker.run(chunkerPCM) }
         hub.emit(.sessionStarted(id: id, dir: dir))
         return Pipeline(engine: engine, archiveTask: archiveTask, chunkerTask: chunkerTask,
-                        hub: hub, id: id, dir: dir)
+                        orchestrator: orchestrator, hub: hub, id: id, dir: dir)
     }
 
     private init(engine: CaptureEngine, archiveTask: Task<Void, Never>,
-                 chunkerTask: Task<Void, Never>, hub: EventHub, id: String, dir: URL) {
+                 chunkerTask: Task<Void, Never>, orchestrator: CorrectionOrchestrator,
+                 hub: EventHub, id: String, dir: URL) {
         self.engine = engine
         self.archiveTask = archiveTask
         self.chunkerTask = chunkerTask
+        self.orchestrator = orchestrator
         self.hub = hub
         self.id = id
         self.dir = dir
@@ -197,6 +204,7 @@ final class Pipeline: Sendable {
         engine.stop()                  // finishes every PCM stream
         await archiveTask.value        // archive drains + closes last chunk
         await chunkerTask.value        // chunker flushes + last window transcribed
+        await orchestrator.finish()    // final claude batch + transcript.md
         SessionStore.finalize(dir: dir, status: .finished)
         hub.emit(.sessionEnded(SessionSummary(
             id: id, dir: dir, startedAt: startedAt, endedAt: .now, status: .finished)))

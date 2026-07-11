@@ -11,7 +11,7 @@ enum AutoTest {
         app.startRecording()
         try? await Task.sleep(for: .seconds(25))
         app.stopRecording()
-        for _ in 0..<60 {
+        for _ in 0..<300 {
             if app.recording == .idle { break }
             try? await Task.sleep(for: .seconds(0.5))
         }

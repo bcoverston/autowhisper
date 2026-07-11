@@ -15,14 +15,16 @@ actor VADChunker {
 
     private let hub: EventHub
     private let draftLog: JSONLWriter
+    private let orchestrator: CorrectionOrchestrator
     private var vad: OpaquePointer?
     private var pending: [Float] = []
     private var baseSample = 0                        // session-absolute offset of pending[0]
     private var nextSegmentID = 0
 
-    init(sessionDir: URL, hub: EventHub) {
+    init(sessionDir: URL, hub: EventHub, orchestrator: CorrectionOrchestrator) {
         self.hub = hub
         self.draftLog = JSONLWriter(url: sessionDir.appending(path: "draft.jsonl"))
+        self.orchestrator = orchestrator
     }
 
     func run(_ stream: AsyncStream<[Float]>) async {
@@ -74,6 +76,9 @@ actor VADChunker {
             nextSegmentID += segments.count
             try draftLog.append(segments)               // disk first…
             hub.emit(.draftSegments(segments))          // …event second
+            if !segments.isEmpty {
+                await orchestrator.enqueue(segments, window: window, windowOffsetMs: offsetMs)
+            }
         } catch {
             hub.emit(.failure(.diskWriteFailed, detail: "draft: \(error.localizedDescription)"))
             hub.emit(.draftSegments([]))                // keep windowsTranscribed counter honest
