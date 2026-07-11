@@ -1,6 +1,7 @@
 @preconcurrency import AVFoundation
 import Events
 import Foundation
+import Synchronization
 
 /// Drains the tap controller's ring buffers on a dedicated queue, converts every
 /// stream to 16 kHz mono float, mixes mic + system into one stream, computes
@@ -21,9 +22,16 @@ final class CaptureEngine: @unchecked Sendable {
     private var scratch: [Float] = []
 
     private var sinks: [AsyncStream<[Float]>.Continuation] = []
+    private let micMuted = Atomic<Bool>(false)
 
     init(hub: EventHub) {
         self.hub = hub
+    }
+
+    /// Mute keeps the mic stream flowing but zeroes its samples, so the mix
+    /// timeline stays aligned and the mic meter drops to zero.
+    func setMicMuted(_ muted: Bool) {
+        micMuted.store(muted, ordering: .relaxed)
     }
 
     /// Register a consumer of the mixed 16 kHz mono PCM. Call before start().
@@ -76,6 +84,9 @@ final class CaptureEngine: @unchecked Sendable {
             guard count > 0 else {
                 mixSources.append(([], stream.isMic))
                 continue
+            }
+            if stream.isMic && micMuted.load(ordering: .relaxed) {
+                for i in 0..<count { scratch[i] = 0 }
             }
             // Pre-mix RMS on the native-rate data.
             var sum: Float = 0

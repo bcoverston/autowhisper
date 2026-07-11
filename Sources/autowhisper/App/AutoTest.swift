@@ -8,6 +8,7 @@ enum AutoTest {
     static func runIfRequested(_ app: AppModel) async {
         guard CommandLine.arguments.contains("--autotest") else { return }
         try? await Task.sleep(for: .seconds(2))
+        if CommandLine.arguments.contains("--mute-mic") { app.micMuted = true }
         app.startRecording()
         try? await Task.sleep(for: .seconds(25))
         app.stopRecording()

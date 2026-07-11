@@ -36,6 +36,9 @@ final class AppModel {
     var live: LiveSession?
     var issues: [Issue] = []
     var summaries: [SessionSummary] = []
+    var micMuted = false {
+        didSet { pipeline?.setMicMuted(micMuted) }
+    }
 
     var menuGlyph: String {
         if !issues.isEmpty { return "exclamationmark.triangle" }
@@ -78,6 +81,7 @@ final class AppModel {
             hub.emit(.resolved(.micPermissionDenied))
             do {
                 let pipeline = try await Pipeline.start(hub: hub)
+                pipeline.setMicMuted(self.micMuted)
                 self.pipeline = pipeline
                 self.recording = .recording(since: .now)
             } catch {
@@ -215,6 +219,10 @@ final class Pipeline: Sendable {
         self.id = id
         self.dir = dir
         self.startedAt = .now
+    }
+
+    func setMicMuted(_ muted: Bool) {
+        engine.setMicMuted(muted)
     }
 
     func stop() async {

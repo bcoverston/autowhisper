@@ -16,6 +16,7 @@ struct MenuContent: View {
         case .finishing:
             Text("Finishing…")
         }
+        Toggle("Microphone", isOn: Binding(get: { !app.micMuted }, set: { app.micMuted = !$0 }))
         if let issue = app.issues.first {
             Divider()
             Text("⚠︎ \(issue.kind.label)")

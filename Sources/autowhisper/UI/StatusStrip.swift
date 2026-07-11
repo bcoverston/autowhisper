@@ -12,7 +12,15 @@ struct StatusStrip: View {
                     Text(timerInterval: since...Date.distantFuture, countsDown: false)
                         .monospacedDigit()
                 }
-                LevelMeter(label: "mic", level: app.micLevel)
+                Button {
+                    app.micMuted.toggle()
+                } label: {
+                    Image(systemName: app.micMuted ? "mic.slash.fill" : "mic.fill")
+                        .foregroundStyle(app.micMuted ? .red : .secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(app.micMuted ? "Microphone muted — click to unmute" : "Mute microphone")
+                LevelMeter(label: "mic", level: app.micMuted ? 0 : app.micLevel)
                 LevelMeter(label: "sys", level: app.systemLevel)
                 Spacer()
                 if let live = app.live {
