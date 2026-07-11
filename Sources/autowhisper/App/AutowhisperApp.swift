@@ -22,6 +22,10 @@ struct AutowhisperApp: App {
         .defaultSize(width: 760, height: 520)
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 

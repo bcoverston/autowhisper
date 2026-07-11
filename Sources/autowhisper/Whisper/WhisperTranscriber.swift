@@ -7,7 +7,10 @@ import whisper
 actor WhisperTranscriber {
     static let shared = WhisperTranscriber()
 
-    static let flagAvgP: Float = 0.6
+    static var flagAvgP: Float {
+        let value = UserDefaults.standard.double(forKey: "confidenceThreshold")
+        return value > 0 ? Float(value) : 0.6
+    }
     static let flagNoSpeech: Float = 0.5
     /// --flag-all: test hook forcing every segment through the re-check path.
     private static let flagAll = CommandLine.arguments.contains("--flag-all")

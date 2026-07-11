@@ -1,3 +1,4 @@
+import AVFoundation
 import Events
 import Foundation
 import Observation
@@ -44,6 +45,7 @@ final class AppModel {
 
     private let hub = EventHub()
     private var pipeline: Pipeline?
+    private var retentionTask: Task<Void, Never>?
 
     init() {
         // Process-lifetime event loop: the single mutation site for pipeline state.
@@ -58,6 +60,7 @@ final class AppModel {
             let list = SessionStore.listSessions()
             await MainActor.run { [weak self] in self?.summaries = list }
         }
+        retentionTask = RetentionManager.schedule()
     }
 
     // MARK: - Recording control
@@ -67,6 +70,12 @@ final class AppModel {
         recording = .starting
         let hub = self.hub
         Task {
+            guard await Self.micAuthorized() else {
+                self.recording = .idle
+                hub.emit(.failure(.micPermissionDenied, detail: "grant access in System Settings → Privacy & Security → Microphone"))
+                return
+            }
+            hub.emit(.resolved(.micPermissionDenied))
             do {
                 let pipeline = try await Pipeline.start(hub: hub)
                 self.pipeline = pipeline
@@ -96,6 +105,14 @@ final class AppModel {
 
     func dismissIssue(_ id: UUID) {
         issues.removeAll { $0.id == id }
+    }
+
+    private static func micAuthorized() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: true
+        case .notDetermined: await AVCaptureDevice.requestAccess(for: .audio)
+        default: false
+        }
     }
 
     // MARK: - Event application (only mutation site for counters)
