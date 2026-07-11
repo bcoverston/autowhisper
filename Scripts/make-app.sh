@@ -20,6 +20,9 @@ if [[ -f "$ROOT/Resources/autowhisper.icns" ]]; then
     cp "$ROOT/Resources/autowhisper.icns" "$APP/Contents/Resources/autowhisper.icns"
     ICON_LINE="<key>CFBundleIconFile</key><string>autowhisper</string>"
 fi
+for glyph in menubar-idle menubar-rec; do
+    [[ -f "$ROOT/Resources/$glyph.png" ]] && cp "$ROOT/Resources/$glyph.png" "$APP/Contents/Resources/"
+done
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -9,11 +9,7 @@ struct AutowhisperApp: App {
         MenuBarExtra(content: {
             MenuContent(app: app)
         }, label: {
-            Image(systemName: app.menuGlyph)
-                .task {
-                    PolicyHook.shared.install()
-                    await AutoTest.runIfRequested(app)
-                }
+            MenuBarLabel(app: app)
         })
 
         Window("autowhisper", id: "main") {
