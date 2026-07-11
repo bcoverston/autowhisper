@@ -71,8 +71,17 @@ enum ClaudeCLI {
 
     /// Returns segment id → corrected text.
     static func correct(_ payload: Payload, timeout: Duration = .seconds(180)) async throws -> [Int: String] {
-        guard let cli = locate() else { throw CLIError.notFound }
         let stdin = try JSONEncoder().encode(payload)
+        let structured = try await invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: timeout)
+        let decoded = try JSONDecoder().decode(Response.Structured.self, from: structured)
+        return Dictionary(uniqueKeysWithValues: decoded.segments.map { ($0.id, $0.text) })
+    }
+
+    /// Runs `claude -p` headless with all tools off and a JSON schema, returning
+    /// the raw `structured_output` JSON. Shared by correction and summarization.
+    static func invoke(prompt: String, schema: String, stdin: Data,
+                       timeout: Duration = .seconds(180)) async throws -> Data {
+        guard let cli = locate() else { throw CLIError.notFound }
 
         let process = Process()
         process.executableURL = cli
@@ -86,9 +95,7 @@ enum ClaudeCLI {
             "--json-schema", schema,
         ]
         process.currentDirectoryURL = SessionStore.root
-        let inPipe = Pipe()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
+        let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
         process.standardInput = inPipe
         process.standardOutput = outPipe
         process.standardError = errPipe
@@ -123,10 +130,40 @@ enum ClaudeCLI {
             let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
             throw CLIError.failed("exit \(process.terminationStatus): \(stderr.prefix(200))")
         }
-        let response = try JSONDecoder().decode(Response.self, from: data)
-        guard !response.is_error, let structured = response.structured_output else {
-            throw CLIError.failed("claude error: \((response.result ?? "no structured output").prefix(200))")
+        struct Envelope: Decodable { let is_error: Bool; let structured_output: JSONAny?; let result: String? }
+        let env = try JSONDecoder().decode(Envelope.self, from: data)
+        guard !env.is_error, let structured = env.structured_output else {
+            throw CLIError.failed("claude error: \((env.result ?? "no structured output").prefix(200))")
         }
-        return Dictionary(uniqueKeysWithValues: structured.segments.map { ($0.id, $0.text) })
+        return try JSONEncoder().encode(structured)
     }
+}
+
+/// Minimal type-erased JSON so `structured_output` can be re-encoded and decoded
+/// into whichever concrete shape the caller expects.
+struct JSONAny: Codable {
+    let value: Any
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+        if let v = try? c.decode([String: JSONAny].self) { value = v.mapValues(\.value) }
+        else if let v = try? c.decode([JSONAny].self) { value = v.map(\.value) }
+        else if let v = try? c.decode(Bool.self) { value = v }
+        else if let v = try? c.decode(Int.self) { value = v }
+        else if let v = try? c.decode(Double.self) { value = v }
+        else if let v = try? c.decode(String.self) { value = v }
+        else { value = NSNull() }
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch value {
+        case let v as [String: Any]: try c.encode(v.mapValues(JSONAny.init))
+        case let v as [Any]: try c.encode(v.map(JSONAny.init))
+        case let v as Bool: try c.encode(v)
+        case let v as Int: try c.encode(v)
+        case let v as Double: try c.encode(v)
+        case let v as String: try c.encode(v)
+        default: try c.encodeNil()
+        }
+    }
+    init(_ any: Any) { value = any }
 }

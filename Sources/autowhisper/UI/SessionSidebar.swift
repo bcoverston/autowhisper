@@ -44,19 +44,20 @@ struct SessionSidebar: View {
                     }
                 }
                 ForEach(groups, id: \.day) { group in
-                    Section(dayLabel(group.day)) {
-                        ForEach(group.sessions) { summary in
-                            row(summary)
-                                .tag(summary.id)
-                                .contextMenu {
-                                    Button("Reveal in Finder") {
-                                        NSWorkspace.shared.activateFileViewerSelecting([summary.dir])
-                                    }
-                                    Divider()
-                                    Button("Delete…", role: .destructive) {
-                                        pendingDelete = summary
-                                    }
-                                }
+                    Section {
+                        sectionRows(group)
+                    } header: {
+                        HStack {
+                            Text(dayLabel(group.day))
+                            Spacer()
+                            Menu {
+                                Button("Create digest…") { app.makeDigest(for: group.day) }
+                            } label: {
+                                Image(systemName: "ellipsis")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .fixedSize()
                         }
                     }
                 }
@@ -84,6 +85,23 @@ struct SessionSidebar: View {
             }
         } message: {
             Text("Permanently removes \(pendingDelete?.title ?? pendingDelete?.id ?? "") — audio chunks and all transcript files.")
+        }
+    }
+
+    @ViewBuilder
+    private func sectionRows(_ group: (day: Date, sessions: [SessionSummary])) -> some View {
+        ForEach(group.sessions) { summary in
+            row(summary)
+                .tag(summary.id)
+                .contextMenu {
+                    Button("Reveal in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([summary.dir])
+                    }
+                    Divider()
+                    Button("Delete…", role: .destructive) {
+                        pendingDelete = summary
+                    }
+                }
         }
     }
 

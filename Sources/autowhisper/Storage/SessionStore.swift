@@ -13,7 +13,18 @@ enum SessionStore {
         var endedAt: Date?
         var status: SessionStatus
         var encoder: String
-        var title: String?
+        var title: String?        // user-set
+        var summary: SessionSummaryDoc?
+    }
+
+    static func setSummary(dir: URL, _ doc: SessionSummaryDoc) {
+        guard var meta = readMeta(dir: dir) else { return }
+        meta.summary = doc
+        try? writeMeta(meta, dir: dir)
+    }
+
+    static func loadSummary(dir: URL) -> SessionSummaryDoc? {
+        readMeta(dir: dir)?.summary
     }
 
     static func createSession(at date: Date = .now) throws -> (id: String, dir: URL) {
@@ -48,7 +59,8 @@ enum SessionStore {
         return dirs.compactMap { dir -> SessionSummary? in
             guard let meta = readMeta(dir: dir) else { return nil }
             return SessionSummary(id: meta.id, dir: dir, startedAt: meta.startedAt,
-                                  endedAt: meta.endedAt, status: meta.status, title: meta.title)
+                                  endedAt: meta.endedAt, status: meta.status,
+                                  title: meta.title ?? meta.summary?.title)
         }
         .sorted { $0.startedAt > $1.startedAt }
     }

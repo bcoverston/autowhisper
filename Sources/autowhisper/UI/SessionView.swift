@@ -24,6 +24,7 @@ struct SessionView: View {
         let corrections: [Int: String]
         let artifacts: [Artifact]
         let audioExpired: Bool
+        let summary: SessionSummaryDoc?
     }
 
     var body: some View {
@@ -35,7 +36,7 @@ struct SessionView: View {
             } else if let loaded, loaded.id == sessionID {
                 content(segments: loaded.segments, recheckedIDs: loaded.recheckedIDs,
                         corrections: loaded.corrections, artifacts: loaded.artifacts,
-                        audioExpired: loaded.audioExpired, isLive: false)
+                        audioExpired: loaded.audioExpired, isLive: false, summary: loaded.summary)
             } else if sessionID != nil {
                 ProgressView()
             } else {
@@ -54,7 +55,8 @@ struct SessionView: View {
                               recheckedIDs: SessionStore.loadRecheckedIDs(dir: dir),
                               corrections: SessionStore.loadCorrections(dir: dir),
                               artifacts: SessionStore.artifacts(dir: dir),
-                              audioExpired: SessionStore.audioExpired(dir: dir))
+                              audioExpired: SessionStore.audioExpired(dir: dir),
+                              summary: SessionStore.loadSummary(dir: dir))
             }.value
             loaded = result
         }
@@ -62,12 +64,14 @@ struct SessionView: View {
 
     private func content(segments: [DraftSegment], recheckedIDs: Set<Int>,
                          corrections: [Int: String], artifacts: [Artifact],
-                         audioExpired: Bool, isLive: Bool) -> some View {
+                         audioExpired: Bool, isLive: Bool,
+                         summary: SessionSummaryDoc? = nil) -> some View {
         VStack(spacing: 0) {
             SessionHeader(app: app, sessionID: sessionID, segments: segments,
                           corrections: corrections, isLive: isLive,
                           mode: $mode, searchText: $searchText)
             Divider()
+            if let summary { SummaryCard(summary: summary) }
             TranscriptView(segments: segments, recheckedIDs: recheckedIDs,
                            corrections: corrections, isLive: isLive,
                            mode: mode, searchText: searchText,

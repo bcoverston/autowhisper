@@ -74,15 +74,43 @@ actor CorrectionOrchestrator {
         }
     }
 
-    /// Session end: final batch, transcript.md, model unload.
+    /// Session end: final batch, transcript.md, summary, model unload.
     func finish() async {
         finishing = true
         batchTask?.cancel()
         batchTask = nil
         await flushBatch()
         writeTranscript()
+        await summarize()
         await RecheckTranscriber.shared.unload()
         hub.emit(.correction(.done))
+    }
+
+    /// One claude call over the corrected transcript → summary.md + session.json.
+    /// Best-effort: a failure leaves the session intact (no summary).
+    private func summarize() async {
+        guard !allSegments.isEmpty else { return }
+        let transcript = allSegments.map { seg -> String in
+            let who = seg.speaker.map { "\($0): " } ?? ""
+            return who + (corrected[seg.id] ?? seg.text)
+        }.joined(separator: "\n")
+        do {
+            let doc = try await Summarizer.summarize(transcript: transcript)
+            SessionStore.setSummary(dir: dir, doc)
+            var md = ["# \(doc.title)", "", doc.summary, ""]
+            if !doc.actionItems.isEmpty {
+                md.append("## Action items")
+                md.append(contentsOf: doc.actionItems.map { "- [ ] \($0)" })
+                md.append("")
+            }
+            if !doc.topics.isEmpty { md.append("Topics: " + doc.topics.joined(separator: ", ")) }
+            try? md.joined(separator: "\n").write(to: dir.appending(path: "summary.md"),
+                                                  atomically: true, encoding: .utf8)
+            hub.emit(.transcriptWritten(dir.appending(path: "summary.md")))
+        } catch {
+            // Summary is optional; surface as an issue but don't fail the session.
+            hub.emit(.failure(.claudeCLIFailed, detail: "summary: \(error.localizedDescription)"))
+        }
     }
 
     private func flushBatch() async {

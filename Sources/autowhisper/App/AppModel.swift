@@ -1,7 +1,16 @@
+import AppKit
 import AVFoundation
 import Events
 import Foundation
 import Observation
+
+extension ISO8601DateFormatter {
+    static func dayString(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
+}
 
 enum RecordingState: Equatable {
     case idle
@@ -197,6 +206,30 @@ final class AppModel {
     func voiceProfiles() async -> [VoiceProfile] { await SpeakerStore.shared.all() }
     func forgetVoice(_ id: UUID) { Task { await SpeakerStore.shared.forget(id) } }
 
+    /// Build a markdown digest of a day's sessions and open it.
+    func makeDigest(for day: Date) {
+        let dirs = summaries
+            .filter { Calendar.current.isDate($0.startedAt, inSameDayAs: day) }
+            .map(\.dir)
+        guard !dirs.isEmpty else { return }
+        Task.detached {
+            let docs = dirs.compactMap { SessionStore.loadSummary(dir: $0)?.summary }
+            guard !docs.isEmpty else { return }
+            guard let text = try? await Summarizer.digest(of: docs) else {
+                await MainActor.run {
+                    self.hub.emit(.failure(.claudeCLIFailed, detail: "digest generation failed"))
+                }
+                return
+            }
+            let digestsDir = SessionStore.root.appending(path: "digests")
+            try? FileManager.default.createDirectory(at: digestsDir, withIntermediateDirectories: true)
+            let name = ISO8601DateFormatter.dayString(day) + ".md"
+            let url = digestsDir.appending(path: name)
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+            await MainActor.run { NSWorkspace.shared.open(url) }
+        }
+    }
+
     private static func micAuthorized() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: true
@@ -276,6 +309,7 @@ final class AppModel {
                 Task.detached { SessionStore.delete(dir: dir) }
             } else {
                 summaries.insert(summary, at: 0)
+                refreshSummaries()   // pick up the auto-title from the written summary
             }
             if restartAfterStop {
                 restartAfterStop = false
