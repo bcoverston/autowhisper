@@ -30,6 +30,15 @@ struct StatusStrip: View {
                         .monospacedDigit()
                 }
             }
+            if case .recording = app.recording {
+                HStack(spacing: 16) {
+                    sourceBadge(active: true,
+                                text: "System audio — \(app.systemDeviceName ?? "…")")
+                    sourceBadge(active: app.micActive,
+                                text: "Microphone — \(app.micDeviceName ?? "…")\(app.micActive ? "" : " (off)")")
+                    Spacer()
+                }
+            }
             ForEach(app.issues) { issue in
                 HStack {
                     Label(issue.kind.label + (issue.detail.map { " — \($0)" } ?? ""),
@@ -48,6 +57,17 @@ struct StatusStrip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    private func sourceBadge(active: Bool, text: String) -> some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(active ? Color.green : Color.secondary.opacity(0.35))
+                .frame(width: 6, height: 6)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(active ? .primary : .secondary)
+        }
     }
 
     private var stateDot: some View {

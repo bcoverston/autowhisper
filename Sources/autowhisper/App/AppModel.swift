@@ -37,8 +37,11 @@ final class AppModel {
     var issues: [Issue] = []
     var summaries: [SessionSummary] = []
     var micMuted = false {
-        didSet { pipeline?.setMicMuted(micMuted) }
+        didSet { pipeline?.setMicEnabled(!micMuted) }
     }
+    var systemDeviceName: String?
+    var micDeviceName: String?
+    var micActive = false
 
     var menuGlyph: String {
         if !issues.isEmpty { return "exclamationmark.triangle" }
@@ -80,8 +83,7 @@ final class AppModel {
             }
             hub.emit(.resolved(.micPermissionDenied))
             do {
-                let pipeline = try await Pipeline.start(hub: hub)
-                pipeline.setMicMuted(self.micMuted)
+                let pipeline = try await Pipeline.start(hub: hub, micOn: !self.micMuted)
                 self.pipeline = pipeline
                 self.recording = .recording(since: .now)
             } catch {
@@ -126,6 +128,11 @@ final class AppModel {
         case .sessionStarted(let id, let dir):
             live = LiveSession(id: id, dir: dir)
 
+        case .captureState(let systemDevice, let micDevice, let micActive):
+            self.systemDeviceName = systemDevice
+            self.micDeviceName = micDevice
+            self.micActive = micActive
+
         case .levels(let mic, let system):
             micLevel = mic
             systemLevel = system
@@ -161,6 +168,8 @@ final class AppModel {
             live = nil
             micLevel = 0
             systemLevel = 0
+            micActive = false
+            systemDeviceName = nil
             recording = .idle
             summaries.removeAll { $0.id == summary.id }
             summaries.insert(summary, at: 0)
@@ -187,7 +196,7 @@ final class Pipeline: Sendable {
     private let dir: URL
     private let startedAt: Date
 
-    static func start(hub: EventHub) async throws -> Pipeline {
+    static func start(hub: EventHub, micOn: Bool) async throws -> Pipeline {
         guard await ModelStore.ensure(.baseEN, hub: hub),
               await ModelStore.ensure(.vad, hub: hub) else {
             throw NSError(domain: "autowhisper", code: 2,
@@ -200,7 +209,7 @@ final class Pipeline: Sendable {
         let chunker = VADChunker(sessionDir: dir, hub: hub, orchestrator: orchestrator)
         let archivePCM = engine.makePCMStream()
         let chunkerPCM = engine.makePCMStream()
-        try engine.start()
+        try engine.start(micOn: micOn)
         let archiveTask = Task { await archive.run(archivePCM) }
         let chunkerTask = Task { await chunker.run(chunkerPCM) }
         hub.emit(.sessionStarted(id: id, dir: dir))
@@ -221,8 +230,8 @@ final class Pipeline: Sendable {
         self.startedAt = .now
     }
 
-    func setMicMuted(_ muted: Bool) {
-        engine.setMicMuted(muted)
+    func setMicEnabled(_ enabled: Bool) {
+        engine.setMicEnabled(enabled)
     }
 
     func stop() async {

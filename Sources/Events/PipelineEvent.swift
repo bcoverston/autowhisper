@@ -89,6 +89,7 @@ public struct Artifact: Identifiable, Sendable, Equatable {
 
 public enum PipelineEvent: Sendable {
     case sessionStarted(id: String, dir: URL)
+    case captureState(systemDevice: String, micDevice: String?, micActive: Bool)
     case levels(mic: Float, system: Float)      // ≤10 Hz, throttled at source
     case chunkClosed(index: Int)                // after AVAudioFile finalized
     case windowCut                              // VAD window handed to transcriber
