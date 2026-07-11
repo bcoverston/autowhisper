@@ -113,6 +113,22 @@ final class AppModel {
         issues.removeAll { $0.id == id }
     }
 
+    func deleteSession(_ summary: SessionSummary) {
+        guard summary.id != live?.id else { return }
+        summaries.removeAll { $0.id == summary.id }
+        Task.detached {
+            SessionStore.delete(dir: summary.dir)
+        }
+    }
+
+    func renameSession(_ summary: SessionSummary, to title: String) {
+        Task.detached {
+            SessionStore.setTitle(dir: summary.dir, title: title)
+            let list = SessionStore.listSessions()
+            await MainActor.run { self.summaries = list }
+        }
+    }
+
     private static func micAuthorized() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: true

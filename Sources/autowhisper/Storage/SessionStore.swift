@@ -13,6 +13,7 @@ enum SessionStore {
         var endedAt: Date?
         var status: SessionStatus
         var encoder: String
+        var title: String?
     }
 
     static func createSession(at date: Date = .now) throws -> (id: String, dir: URL) {
@@ -47,7 +48,7 @@ enum SessionStore {
         return dirs.compactMap { dir -> SessionSummary? in
             guard let meta = readMeta(dir: dir) else { return nil }
             return SessionSummary(id: meta.id, dir: dir, startedAt: meta.startedAt,
-                                  endedAt: meta.endedAt, status: meta.status)
+                                  endedAt: meta.endedAt, status: meta.status, title: meta.title)
         }
         .sorted { $0.startedAt > $1.startedAt }
     }
@@ -69,6 +70,55 @@ enum SessionStore {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         result.append(contentsOf: chunks.map { Artifact(name: $0.lastPathComponent, url: $0, kind: .audioChunk) })
         return result
+    }
+
+    static func setTitle(dir: URL, title: String) {
+        guard var meta = readMeta(dir: dir) else { return }
+        meta.title = title.isEmpty ? nil : title
+        try? writeMeta(meta, dir: dir)
+    }
+
+    /// Permanently removes a session directory (audio + transcripts).
+    static func delete(dir: URL) {
+        guard dir.path.hasPrefix(sessionsDir.path) else { return }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    static func loadCorrections(dir: URL) -> [Int: String] {
+        struct Entry: Decodable { let id: Int; let text: String }
+        guard let data = try? Data(contentsOf: dir.appending(path: "corrected.jsonl")) else { return [:] }
+        let decoder = JSONDecoder()
+        var result: [Int: String] = [:]
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            if let e = try? decoder.decode(Entry.self, from: line) { result[e.id] = e.text }
+        }
+        return result
+    }
+
+    static func loadRecheckedIDs(dir: URL) -> Set<Int> {
+        struct Entry: Decodable { let id: Int }
+        guard let data = try? Data(contentsOf: dir.appending(path: "recheck.jsonl")) else { return [] }
+        let decoder = JSONDecoder()
+        return Set(data.split(separator: UInt8(ascii: "\n")).compactMap {
+            (try? decoder.decode(Entry.self, from: $0))?.id
+        })
+    }
+
+    /// IDs of sessions whose transcript or draft contains `query` (case-insensitive).
+    static func sessionsMatching(_ query: String) -> Set<String> {
+        let needle = query.lowercased()
+        guard !needle.isEmpty else { return [] }
+        var hits: Set<String> = []
+        for summary in listSessions() {
+            for name in ["transcript.md", "draft.jsonl"] {
+                if let text = try? String(contentsOf: summary.dir.appending(path: name), encoding: .utf8),
+                   text.lowercased().contains(needle) {
+                    hits.insert(summary.id)
+                    break
+                }
+            }
+        }
+        return hits
     }
 
     /// JSONL reader tolerating a trailing partial line (power loss can truncate).

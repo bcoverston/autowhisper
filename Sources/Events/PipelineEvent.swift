@@ -56,13 +56,16 @@ public struct SessionSummary: Identifiable, Sendable, Equatable {
     public let startedAt: Date
     public let endedAt: Date?
     public let status: SessionStatus
+    public let title: String?
 
-    public init(id: String, dir: URL, startedAt: Date, endedAt: Date?, status: SessionStatus) {
+    public init(id: String, dir: URL, startedAt: Date, endedAt: Date?, status: SessionStatus,
+                title: String? = nil) {
         self.id = id
         self.dir = dir
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.status = status
+        self.title = title
     }
 }
 
