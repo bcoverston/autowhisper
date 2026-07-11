@@ -4,6 +4,7 @@
 set -euo pipefail
 
 PRODUCT="${1:-autowhisper}"
+[[ "$PRODUCT" == "--install" ]] && PRODUCT=autowhisper
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/.build/release/$PRODUCT"
 APP="$ROOT/dist/$PRODUCT.app"
@@ -54,3 +55,10 @@ fi
 codesign "${SIGN[@]}" "$APP"
 
 echo "built: $APP (signed: ${IDENTITY:-ad-hoc})"
+
+# --install: copy to /Applications (replacing any previous install)
+if [[ "${2:-}" == "--install" || "${1:-}" == "--install" ]]; then
+    pkill -x "$PRODUCT" 2>/dev/null || true
+    ditto "$APP" "/Applications/$PRODUCT.app"
+    echo "installed: /Applications/$PRODUCT.app"
+fi
