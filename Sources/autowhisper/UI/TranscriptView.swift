@@ -103,7 +103,10 @@ struct SegmentRow: View {
     var onPlay: (() -> Void)?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // .top alignment (not .firstTextBaseline): the wrapping transcript text
+        // determines the row height, so multi-line segments can't overlap the
+        // next row. Fixed-width gutters sit at the first line via a small top pad.
+        HStack(alignment: .top, spacing: 8) {
             Rectangle()
                 .fill(showDraftMarkers && segment.flagged ? Color.orange : .clear)
                 .frame(width: 3)
@@ -119,20 +122,23 @@ struct SegmentRow: View {
                     Color.clear
                 }
             }
-            .frame(width: 14)
+            .frame(width: 14, height: 16)
             Text(timestamp)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(isPlaying ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
                 .frame(width: 44, alignment: .trailing)
+                .padding(.top, 2)
             Text(highlighted)
                 .font(.body)
                 .lineSpacing(2)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             trailing
                 .frame(width: 60, alignment: .trailing)
+                .padding(.top, 2)
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
         .padding(.horizontal, 4)
         .background(hovered ? Color.primary.opacity(0.05) : .clear,
                     in: RoundedRectangle(cornerRadius: 5))

@@ -42,6 +42,7 @@ final class CaptureEngine: @unchecked Sendable {
     private var rebuildScheduled = false
     private var zeroDeliveredSeconds = 0.0
     private var lastWatchdogRebuildNs: UInt64 = 0
+    private var tapIssueRaised = false
     private var sleepObservers: [Any] = []
 
     init(hub: EventHub) {
@@ -200,9 +201,11 @@ final class CaptureEngine: @unchecked Sendable {
         sysPending.removeAll(keepingCapacity: true)
         do {
             try controller.rebuild()
+            tapIssueRaised = false
             hub.emit(.resolved(.tapInvalidated))
         } catch {
             hub.emit(.failure(.tapInvalidated, detail: "rebuild: \(error.localizedDescription)"))
+            tapIssueRaised = true
         }
         hub.emit(.captureState(
             systemDevice: SystemTapController.deviceName(kAudioHardwarePropertyDefaultOutputDevice),
@@ -213,9 +216,14 @@ final class CaptureEngine: @unchecked Sendable {
     /// Delivered-but-all-zero buffers signal the Bluetooth renegotiation
     /// failure (or revoked TCC) — an idle device delivers nothing instead.
     /// One rebuild attempt per 10 min; a second silent stretch raises an issue.
+    /// When real audio returns, the issue is cleared so the banner doesn't stick.
     private func watchdog(deliveredZeros: Bool, seconds: Double) {
         guard deliveredZeros else {
             zeroDeliveredSeconds = 0
+            if tapIssueRaised {
+                tapIssueRaised = false
+                hub.emit(.resolved(.tapInvalidated))
+            }
             return
         }
         zeroDeliveredSeconds += seconds
@@ -228,6 +236,7 @@ final class CaptureEngine: @unchecked Sendable {
         } else {
             hub.emit(.failure(.tapInvalidated,
                               detail: "system audio is delivering silence; check Screen & System Audio Recording permission"))
+            tapIssueRaised = true
         }
     }
 
