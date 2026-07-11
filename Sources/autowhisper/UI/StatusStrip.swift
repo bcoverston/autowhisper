@@ -89,9 +89,9 @@ struct StatusStrip: View {
 
     private var stateText: String {
         switch app.recording {
-        case .idle: "idle"
+        case .idle: app.ambientMode ? "ambient — idle" : "idle"
         case .starting: "starting…"
-        case .recording: "recording"
+        case .recording: app.ambientMode ? "ambient — listening" : "recording"
         case .finishing: "finishing…"
         }
     }

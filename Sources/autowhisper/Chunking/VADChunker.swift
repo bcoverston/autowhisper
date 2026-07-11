@@ -20,6 +20,7 @@ actor VADChunker {
     private var pending: [Float] = []
     private var baseSample = 0                        // session-absolute offset of pending[0]
     private var nextSegmentID = 0
+    private var silenceRunSeconds = 0.0               // continuous silence since last speech
 
     init(sessionDir: URL, hub: EventHub, orchestrator: CorrectionOrchestrator) {
         self.hub = hub
@@ -49,10 +50,13 @@ actor VADChunker {
 
         if segments.isEmpty {
             // Pure silence: drop it (this is what makes always-on cheap).
+            silenceRunSeconds += Double(pending.count) / Double(Self.rate)
+            hub.emit(.silence(seconds: silenceRunSeconds))
             baseSample += pending.count
             pending.removeAll(keepingCapacity: true)
             return nil
         }
+        silenceRunSeconds = 0
         // Cut after the last speech end if enough trailing quiet has accrued.
         let lastEnd = Int(segments.last!.end * Double(Self.rate))
         if Double(pending.count - lastEnd) / Double(Self.rate) >= Self.tailSilence {

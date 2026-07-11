@@ -2,6 +2,7 @@ import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
+    @Bindable var app: AppModel
     @AppStorage("retentionDays") private var retentionDays = 30
     @AppStorage("confidenceThreshold") private var confidenceThreshold = 0.6
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -9,6 +10,11 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Toggle("Ambient mode (always-on)", isOn: $app.ambientMode)
+            Text("Records continuously while enabled and resumes at launch. Sessions split at long silences; empty stretches are discarded.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {

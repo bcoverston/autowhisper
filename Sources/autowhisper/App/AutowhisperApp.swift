@@ -24,7 +24,7 @@ struct AutowhisperApp: App {
         .restorationBehavior(.disabled)
 
         Settings {
-            SettingsView()
+            SettingsView(app: app)
         }
     }
 }

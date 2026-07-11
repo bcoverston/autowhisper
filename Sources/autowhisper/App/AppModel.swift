@@ -42,16 +42,26 @@ final class AppModel {
     var systemDeviceName: String?
     var micDeviceName: String?
     var micActive = false
+    var ambientMode = UserDefaults.standard.bool(forKey: "ambientMode") {
+        didSet {
+            UserDefaults.standard.set(ambientMode, forKey: "ambientMode")
+            if ambientMode, recording == .idle { startRecording() }
+            else if !ambientMode, case .recording = recording { stopRecording() }
+        }
+    }
 
     var menuGlyph: String {
         if !issues.isEmpty { return "exclamationmark.triangle" }
         if case .recording = recording { return "waveform.circle.fill" }
+        if ambientMode { return "waveform.circle" }
         return "waveform.circle"
     }
 
     private let hub = EventHub()
     private var pipeline: Pipeline?
     private var retentionTask: Task<Void, Never>?
+    private var restartAfterStop = false      // set when an ambient rollover closes a session
+    private var rolloverTimer: Timer?         // fires the length/day caps independent of silence
 
     init() {
         // Process-lifetime event loop: the single mutation site for pipeline state.
@@ -67,12 +77,25 @@ final class AppModel {
             await MainActor.run { [weak self] in self?.summaries = list }
         }
         retentionTask = RetentionManager.schedule()
+
+        // Ambient mode auto-resumes listening at launch (user-chosen behavior).
+        if ambientMode {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                if self.recording == .idle { self.startRecording() }
+            }
+        }
     }
 
     // MARK: - Recording control
 
     func startRecording() {
         guard recording == .idle else { return }
+        if ambientMode, !AmbientPolicy.hasFreeSpace() {
+            recording = .idle
+            hub.emit(.failure(.diskWriteFailed, detail: "less than 5 GB free — ambient capture paused"))
+            return
+        }
         recording = .starting
         let hub = self.hub
         Task {
@@ -86,6 +109,7 @@ final class AppModel {
                 let pipeline = try await Pipeline.start(hub: hub, micOn: !self.micMuted)
                 self.pipeline = pipeline
                 self.recording = .recording(since: .now)
+                self.startRolloverTimer()
             } catch {
                 self.recording = .idle
                 hub.emit(.failure(.tapInvalidated, detail: "\(error)"))
@@ -99,6 +123,30 @@ final class AppModel {
         Task {
             await pipeline.stop()
             self.pipeline = nil
+        }
+    }
+
+    /// Evaluates the ambient rollover policy. The silence case is driven by
+    /// `.silence` events; the length/day caps are driven by `rolloverTimer`
+    /// (which fires regardless of audio, so continuous speech still rolls over
+    /// at the 4 h / day boundary).
+    private func checkRollover(silenceRunSeconds: Double) {
+        guard ambientMode, case .recording(let since) = recording else { return }
+        let verdict = AmbientPolicy.rollover(
+            sessionStart: since, silenceRunSeconds: silenceRunSeconds, now: .now,
+            startOfToday: Calendar.current.startOfDay(for: .now))
+        guard verdict != .none else { return }
+        restartAfterStop = true
+        stopRecording()
+    }
+
+    private func startRolloverTimer() {
+        rolloverTimer?.invalidate()
+        guard ambientMode else { return }
+        let override = UserDefaults.standard.double(forKey: "rolloverTickOverride")
+        let interval = override > 0 ? override : 60
+        rolloverTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkRollover(silenceRunSeconds: 0) }
         }
     }
 
@@ -162,6 +210,9 @@ final class AppModel {
         case .windowCut:
             live?.windowsCut += 1
 
+        case .silence(let seconds):
+            checkRollover(silenceRunSeconds: seconds)   // silence-triggered path
+
         case .draftSegments(let batch):
             live?.windowsTranscribed += 1
             live?.segments.append(contentsOf: batch)
@@ -181,14 +232,28 @@ final class AppModel {
             }
 
         case .sessionEnded(let summary):
+            // Ambient generates many empty sessions during quiet stretches —
+            // suppress ones with no transcribed speech instead of listing them.
+            let empty = (live?.segments.isEmpty ?? false)
             live = nil
             micLevel = 0
             systemLevel = 0
             micActive = false
             systemDeviceName = nil
             recording = .idle
+            rolloverTimer?.invalidate()
+            rolloverTimer = nil
             summaries.removeAll { $0.id == summary.id }
-            summaries.insert(summary, at: 0)
+            if empty {
+                let dir = summary.dir
+                Task.detached { SessionStore.delete(dir: dir) }
+            } else {
+                summaries.insert(summary, at: 0)
+            }
+            if restartAfterStop {
+                restartAfterStop = false
+                if ambientMode { startRecording() }
+            }
 
         case .failure(let kind, let detail):
             guard !issues.contains(where: { $0.kind == kind }) else { return }

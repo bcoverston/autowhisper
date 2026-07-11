@@ -96,6 +96,7 @@ public enum PipelineEvent: Sendable {
     case levels(mic: Float, system: Float)      // ≤10 Hz, throttled at source
     case chunkClosed(index: Int)                // after AVAudioFile finalized
     case windowCut                              // VAD window handed to transcriber
+    case silence(seconds: Double)               // running continuous-silence duration (ambient segmentation)
     case draftSegments([DraftSegment])          // one VAD window's batch, post-JSONL-append
     case rechecked(ids: [Int])                  // after recheck.jsonl append
     case correctionApplied([Int: String])       // segment id → corrected text, post-jsonl-append
