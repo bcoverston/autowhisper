@@ -54,8 +54,16 @@ if otool -L "$BIN" | grep -q "whisper.framework"; then
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$PRODUCT" 2>/dev/null || true
 fi
 
-# Embedded frameworks must be signed before the outer bundle.
+# Pick a stable code identity so TCC (mic / system-audio) permissions persist
+# across rebuilds: a real Apple Development cert if present, else the local
+# self-signed identity from Scripts/make-signing-cert.sh (untrusted, so it's
+# matched by hash, not via -v), else ad-hoc (which re-prompts every rebuild).
 IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}')"
+IDENTITY_LABEL="$IDENTITY"
+if [[ -z "$IDENTITY" ]]; then
+    IDENTITY="$(security find-identity -p codesigning 2>/dev/null | awk '/autowhisper Local Signing/ {print $2; exit}')"
+    [[ -n "$IDENTITY" ]] && IDENTITY_LABEL="autowhisper Local Signing"
+fi
 SIGN=("--force" "--sign" "${IDENTITY:--}")
 if [[ -d "$FRAMEWORKS" ]]; then
     find "$FRAMEWORKS" -maxdepth 1 \( -name "*.framework" -o -name "*.dylib" \) \
@@ -63,7 +71,7 @@ if [[ -d "$FRAMEWORKS" ]]; then
 fi
 codesign "${SIGN[@]}" "$APP"
 
-echo "built: $APP (signed: ${IDENTITY:-ad-hoc})"
+echo "built: $APP (signed: ${IDENTITY_LABEL:-ad-hoc})"
 
 # --install: copy to /Applications (replacing any previous install)
 if [[ "${2:-}" == "--install" || "${1:-}" == "--install" ]]; then

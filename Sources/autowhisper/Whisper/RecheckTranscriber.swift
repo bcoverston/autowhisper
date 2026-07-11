@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import whisper
 
 /// large-v3-turbo re-transcription of low-confidence spans. Lazy-loaded
@@ -6,19 +7,20 @@ import whisper
 actor RecheckTranscriber {
     static let shared = RecheckTranscriber()
 
-    private var ctx: OpaquePointer?
+    private let ctxBox = WhisperContextBox()
+    private let shuttingDown = Atomic<Bool>(false)
 
     /// Returns the higher-accuracy hypothesis for a short audio slice,
     /// or nil when the model is unavailable or produced nothing.
     func hypothesis(for slice: [Float]) -> String? {
-        guard ModelStore.isPresent(.largeTurbo) else { return nil }
-        if ctx == nil {
+        guard !shuttingDown.load(ordering: .relaxed), ModelStore.isPresent(.largeTurbo) else { return nil }
+        if ctxBox.get() == nil {
             WhisperTranscriber.quietLogs()
             var params = whisper_context_default_params()
             params.use_gpu = true
-            ctx = whisper_init_from_file_with_params(ModelStore.Model.largeTurbo.url.path, params)
+            ctxBox.set(whisper_init_from_file_with_params(ModelStore.Model.largeTurbo.url.path, params))
         }
-        guard let ctx else { return nil }
+        guard let ctx = ctxBox.get() else { return nil }
 
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
         params.print_progress = false
@@ -39,7 +41,12 @@ actor RecheckTranscriber {
     }
 
     func unload() {
-        if let ctx { whisper_free(ctx) }
-        ctx = nil
+        ctxBox.free()
+    }
+
+    /// Synchronous teardown at process exit (see WhisperTranscriber.shutdownSync).
+    nonisolated func shutdownSync() {
+        shuttingDown.store(true, ordering: .relaxed)
+        ctxBox.free()
     }
 }

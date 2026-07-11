@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct AutowhisperApp: App {
     @State private var app = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
         MenuBarExtra(content: {
@@ -28,6 +29,18 @@ struct AutowhisperApp: App {
         Settings {
             SettingsView(app: app)
         }
+    }
+}
+
+/// Frees the Metal-backed whisper contexts synchronously as the process exits,
+/// avoiding the ggml Metal teardown abort that fires when they're instead torn
+/// down during process teardown (bad destruction order). `applicationWill
+/// Terminate` runs on the main thread and the app waits for it before exit, so
+/// a synchronous free here happens while the Metal device is still valid.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        WhisperTranscriber.shared.shutdownSync()
+        RecheckTranscriber.shared.shutdownSync()
     }
 }
 
