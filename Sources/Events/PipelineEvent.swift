@@ -8,8 +8,10 @@ public struct DraftSegment: Codable, Identifiable, Sendable, Equatable {
     public let avg_p: Float
     public let no_speech_prob: Float
     public let flagged: Bool
+    public var speaker: String?   // resolved label ("Ben", "Speaker 1"); nil until attributed
 
-    public init(id: Int, t0_ms: Int, t1_ms: Int, text: String, avg_p: Float, no_speech_prob: Float, flagged: Bool) {
+    public init(id: Int, t0_ms: Int, t1_ms: Int, text: String, avg_p: Float,
+                no_speech_prob: Float, flagged: Bool, speaker: String? = nil) {
         self.id = id
         self.t0_ms = t0_ms
         self.t1_ms = t1_ms
@@ -17,6 +19,7 @@ public struct DraftSegment: Codable, Identifiable, Sendable, Equatable {
         self.avg_p = avg_p
         self.no_speech_prob = no_speech_prob
         self.flagged = flagged
+        self.speaker = speaker
     }
 }
 
@@ -99,6 +102,7 @@ public enum PipelineEvent: Sendable {
     case silence(seconds: Double)               // running continuous-silence duration (ambient segmentation)
     case draftSegments([DraftSegment])          // one VAD window's batch, post-JSONL-append
     case rechecked(ids: [Int])                  // after recheck.jsonl append
+    case speakersAttributed([Int: String])      // segment id → speaker label (per-window diarization)
     case correctionApplied([Int: String])       // segment id → corrected text, post-jsonl-append
     case correction(CorrectionState)
     case transcriptWritten(URL)

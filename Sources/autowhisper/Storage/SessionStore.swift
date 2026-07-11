@@ -121,6 +121,31 @@ enum SessionStore {
         return hits
     }
 
+    static func loadSpeakerEmbeddings(dir: URL) -> [String: [Float]] {
+        guard let data = try? Data(contentsOf: dir.appending(path: "speaker-embeddings.json")),
+              let map = try? JSONDecoder().decode([String: [Float]].self, from: data) else { return [:] }
+        return map
+    }
+
+    /// Rewrite draft.jsonl replacing one speaker label with another (after tagging).
+    static func relabelSpeaker(dir: URL, from: String, to: String) {
+        let url = dir.appending(path: "draft.jsonl")
+        var segments = loadDraftSegments(dir: dir)
+        guard segments.contains(where: { $0.speaker == from }) else { return }
+        segments = segments.map { var s = $0; if s.speaker == from { s.speaker = to }; return s }
+        let encoder = JSONEncoder()
+        let lines = segments.compactMap { try? encoder.encode($0) }
+        var data = Data()
+        for line in lines { data.append(line); data.append(UInt8(ascii: "\n")) }
+        try? data.write(to: url)
+        // Keep the embeddings file's key in sync so re-tagging works.
+        var embeddings = loadSpeakerEmbeddings(dir: dir)
+        if let e = embeddings.removeValue(forKey: from) {
+            embeddings[to] = e
+            try? JSONEncoder().encode(embeddings).write(to: dir.appending(path: "speaker-embeddings.json"))
+        }
+    }
+
     /// JSONL reader tolerating a trailing partial line (power loss can truncate).
     static func loadDraftSegments(dir: URL) -> [DraftSegment] {
         guard let data = try? Data(contentsOf: dir.appending(path: "draft.jsonl")) else { return [] }

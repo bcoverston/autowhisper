@@ -31,3 +31,12 @@
 - 5× open/close cycles clean: `openWindow` + `setActivationPolicy(.regular)` + `activate()` on open; `NSWindow.willCloseNotification` observer flips back to `.accessory` when the last main window closes. No zombie windows, no stuck dock icon.
 - Driver/housekeeping tasks can live in the MenuBarExtra *label* view (`.task {}`) — it is instantiated at launch, unlike the menu content.
 - Swift 6: notification-center closures need values extracted before `MainActor.assumeIsolated` (sending `note` across risks data-race error).
+
+## Spike: FluidAudio diarization (PASS, 2026-07-11)
+
+- SwiftPM `from: "0.15.5"`. `DiarizerModels.downloadIfNeeded()` auto-fetches ~13 CoreML files to `~/Library/Application Support/FluidAudio/Models/` (fast, one-time; compiles wespeaker + pyannote in ~1s). Runs on ANE.
+- `DiarizerManager().initialize(models:)` then `try performCompleteDiarization(_ audio: RandomAccessCollection<Float>)` — takes our exact 16 kHz mono `[Float]`; **throws** (not in my research). ~3.4s for 18s audio.
+- `DiarizationResult.segments: [TimedSpeakerSegment {speakerId: String, startTimeSeconds, endTimeSeconds}]`. `speakerDatabase` was nil — embeddings come from `diarizer.speakerManager` instead.
+- **Verified within-session grouping**: 3-voice sequence (Daniel/Samantha/Daniel) → 2 speakers, Daniel's two non-adjacent utterances both labeled "1". 
+- **Cross-session embeddings**: `diarizer.speakerManager.getSpeakerList() -> [Speaker {id, name, currentEmbedding: [Float], duration}]`; `currentEmbedding` is **256-d, L2-normalized**. `initializeKnownSpeakers([Speaker])` seeds enrolled profiles (so diarization auto-assigns known IDs); `findSpeaker(with:speakerThreshold:) -> (id?, distance)` for matching. Config: `DiarizerConfig(clusteringThreshold: 0.7)` default (NOT 0.65).
+- Plan: per-session batch diarization; seed enrolled `VoiceProfile`s as known speakers; persist `getSpeakerList()` embeddings; cross-session match via cosine + margin rule (0.55/0.06).

@@ -28,6 +28,10 @@ struct MenuContent: View {
             openWindow(id: "main")
             PolicyHook.shared.windowOpened()
         }
+        Button("Voices…") {
+            openWindow(id: "voices")
+            PolicyHook.shared.windowOpened()
+        }
         Divider()
         Button("Quit") { NSApp.terminate(nil) }
     }

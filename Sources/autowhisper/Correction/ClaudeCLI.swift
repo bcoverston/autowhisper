@@ -8,8 +8,10 @@ enum ClaudeCLI {
     Correct this speech-to-text draft transcript. Each segment has a confidence \
     score (avg_p) and a no-speech probability; low-confidence segments may include \
     alt_hypothesis from a more accurate model — use it to arbitrate what was said. \
-    Fix mis-transcriptions, casing, and punctuation only; never paraphrase, \
-    summarize, or merge segments. Return every segment with its final text.
+    Some segments carry a speaker label; use it as dialog context to keep \
+    attribution coherent, but do not change speakers. Fix mis-transcriptions, \
+    casing, and punctuation only; never paraphrase, summarize, or merge segments. \
+    Return every segment with its final text.
     """
 
     static let schema = """
@@ -28,6 +30,7 @@ enum ClaudeCLI {
             let avg_p: Float
             let no_speech_prob: Float
             let alt_hypothesis: String?
+            let speaker: String?
         }
         let segments: [Segment]
     }

@@ -16,14 +16,18 @@ actor VADChunker {
     private let hub: EventHub
     private let draftLog: JSONLWriter
     private let orchestrator: CorrectionOrchestrator
+    private let attributor = SpeakerAttributor()
     private var vad: OpaquePointer?
     private var pending: [Float] = []
     private var baseSample = 0                        // session-absolute offset of pending[0]
     private var nextSegmentID = 0
     private var silenceRunSeconds = 0.0               // continuous silence since last speech
 
+    private let sessionDir: URL
+
     init(sessionDir: URL, hub: EventHub, orchestrator: CorrectionOrchestrator) {
         self.hub = hub
+        self.sessionDir = sessionDir
         self.draftLog = JSONLWriter(url: sessionDir.appending(path: "draft.jsonl"))
         self.orchestrator = orchestrator
     }
@@ -38,6 +42,12 @@ actor VADChunker {
         // Session end: flush whatever remains if it contains speech.
         if !pending.isEmpty, speechSegments(in: pending)?.isEmpty == false {
             await emitWindow(length: pending.count)
+        }
+        // Persist per-session speaker embeddings for the tagging UI (past or live).
+        let speakers = await attributor.sessionSpeakers()
+        if !speakers.isEmpty {
+            let url = sessionDir.appending(path: "speaker-embeddings.json")
+            try? JSONEncoder().encode(speakers).write(to: url)
         }
         if let vad { whisper_vad_free(vad) }
         vad = nil
@@ -75,11 +85,22 @@ actor VADChunker {
         baseSample += length
         hub.emit(.windowCut)
         do {
-            let segments = try await WhisperTranscriber.shared.transcribe(
+            var segments = try await WhisperTranscriber.shared.transcribe(
                 window: window, offsetMs: offsetMs, firstID: nextSegmentID)
             nextSegmentID += segments.count
+
+            // Diarize the same window and attach speaker labels (best-effort;
+            // runs on the ANE, off the whisper GPU path).
+            let speakers = await attributor.attribute(window: window, offsetMs: offsetMs, segments: segments)
+            if !speakers.isEmpty {
+                segments = segments.map {
+                    var s = $0; s.speaker = speakers[$0.id] ?? $0.speaker; return s
+                }
+            }
+
             try draftLog.append(segments)               // disk first…
             hub.emit(.draftSegments(segments))          // …event second
+            if !speakers.isEmpty { hub.emit(.speakersAttributed(speakers)) }
             if !segments.isEmpty {
                 await orchestrator.enqueue(segments, window: window, windowOffsetMs: offsetMs)
             }

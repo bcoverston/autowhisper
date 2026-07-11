@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Bindable var app: AppModel
     @AppStorage("retentionDays") private var retentionDays = 30
     @AppStorage("confidenceThreshold") private var confidenceThreshold = 0.6
+    @AppStorage("sameVoiceThreshold") private var sameVoiceThreshold = 0.55
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var loginItemError: String?
 
@@ -44,6 +45,17 @@ struct SettingsView: View {
                 Text("Re-check below \(confidenceThreshold, format: .number.precision(.fractionLength(2)))")
             }
             Text("Segments with mean token confidence under this threshold are re-transcribed with the large model before correction.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Slider(value: $sameVoiceThreshold, in: 0.40...0.75, step: 0.01) {
+                Text("Same-voice match ≥ \(sameVoiceThreshold, format: .number.precision(.fractionLength(2)))")
+            } minimumValueLabel: {
+                Text("looser").font(.caption2)
+            } maximumValueLabel: {
+                Text("stricter").font(.caption2)
+            }
+            Text("How close a voice must match an enrolled profile to auto-label it. A margin gate also prevents merging two similar voices.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

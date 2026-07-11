@@ -23,6 +23,12 @@ struct AutowhisperApp: App {
         .defaultLaunchBehavior(.suppressed)
         .restorationBehavior(.disabled)
 
+        Window("Voices", id: "voices") {
+            VoicesLibrary(app: app)
+        }
+        .defaultSize(width: 460, height: 380)
+        .defaultLaunchBehavior(.suppressed)
+
         Settings {
             SettingsView(app: app)
         }
@@ -42,9 +48,10 @@ final class PolicyHook {
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { note in
             let closingWindow = note.object as? NSWindow
+            let ours: Set<String> = ["autowhisper", "Voices"]
             MainActor.assumeIsolated {
-                guard let closing = closingWindow, closing.title == "autowhisper" else { return }
-                let remaining = NSApp.windows.filter { $0.title == "autowhisper" && $0.isVisible && $0 !== closing }
+                guard let closing = closingWindow, ours.contains(closing.title) else { return }
+                let remaining = NSApp.windows.filter { ours.contains($0.title) && $0.isVisible && $0 !== closing }
                 if remaining.isEmpty {
                     NSApp.setActivationPolicy(.accessory)
                 }

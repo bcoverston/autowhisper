@@ -177,6 +177,26 @@ final class AppModel {
         }
     }
 
+    /// Tag a session speaker label ("Speaker 1") with a name ("Ben"): enroll the
+    /// voice so future sessions auto-label, and relabel this session's segments.
+    func tagSpeaker(label: String, as name: String, in dir: URL) {
+        Task.detached {
+            guard let embedding = SessionStore.loadSpeakerEmbeddings(dir: dir)[label] else { return }
+            await SpeakerStore.shared.enroll(name: name, embedding: embedding)
+            SessionStore.relabelSpeaker(dir: dir, from: label, to: name)
+            await MainActor.run {
+                if self.live?.dir == dir {
+                    self.live?.segments = self.live!.segments.map {
+                        var s = $0; if s.speaker == label { s.speaker = name }; return s
+                    }
+                }
+            }
+        }
+    }
+
+    func voiceProfiles() async -> [VoiceProfile] { await SpeakerStore.shared.all() }
+    func forgetVoice(_ id: UUID) { Task { await SpeakerStore.shared.forget(id) } }
+
     private static func micAuthorized() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: true
@@ -219,6 +239,13 @@ final class AppModel {
 
         case .rechecked(let ids):
             live?.recheckedIDs.formUnion(ids)
+
+        case .speakersAttributed(let map):
+            guard var segments = live?.segments else { return }
+            for i in segments.indices {
+                if let label = map[segments[i].id] { segments[i].speaker = label }
+            }
+            live?.segments = segments
 
         case .correctionApplied(let map):
             live?.corrections.merge(map) { _, new in new }

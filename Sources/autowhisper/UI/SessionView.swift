@@ -14,6 +14,8 @@ struct SessionView: View {
     @State private var loaded: LoadedSession?
     @State private var mode: TranscriptMode = .corrected
     @State private var searchText = ""
+    @State private var taggingLabel: String?
+    @State private var tagName = ""
 
     struct LoadedSession {
         let id: String
@@ -68,9 +70,24 @@ struct SessionView: View {
             Divider()
             TranscriptView(segments: segments, recheckedIDs: recheckedIDs,
                            corrections: corrections, isLive: isLive,
-                           mode: mode, searchText: searchText)
+                           mode: mode, searchText: searchText,
+                           onTagSpeaker: { taggingLabel = $0; tagName = "" })
             Divider()
             ArtifactBar(artifacts: artifacts, audioExpired: audioExpired)
+        }
+        .alert("Tag speaker", isPresented: Binding(
+            get: { taggingLabel != nil }, set: { if !$0 { taggingLabel = nil } })) {
+            TextField("Name (e.g. Ben)", text: $tagName)
+            Button("Cancel", role: .cancel) { taggingLabel = nil }
+            Button("Tag") {
+                if let label = taggingLabel, !tagName.isEmpty,
+                   let dir = app.summaries.first(where: { $0.id == sessionID })?.dir ?? app.live?.dir {
+                    app.tagSpeaker(label: label, as: tagName, in: dir)
+                }
+                taggingLabel = nil
+            }
+        } message: {
+            Text("Enrolls this voice so future sessions auto-label it, and relabels this session.")
         }
     }
 }

@@ -95,7 +95,7 @@ actor CorrectionOrchestrator {
         let payload = ClaudeCLI.Payload(segments: batch.map {
             .init(id: $0.id, t0: $0.t0_ms, t1: $0.t1_ms, text: $0.text,
                   avg_p: $0.avg_p, no_speech_prob: $0.no_speech_prob,
-                  alt_hypothesis: alternates[$0.id])
+                  alt_hypothesis: alternates[$0.id], speaker: $0.speaker)
         })
         do {
             let result = try await ClaudeCLI.correct(payload)
@@ -115,11 +115,25 @@ actor CorrectionOrchestrator {
 
     private func writeTranscript() {
         guard !allSegments.isEmpty else { return }
+        let hasSpeakers = allSegments.contains { $0.speaker != nil }
         var lines = ["# Session \(dir.lastPathComponent)", ""]
+        var lastSpeaker: String?
         for segment in allSegments {
             let s = segment.t0_ms / 1000
             let stamp = String(format: "[%d:%02d]", s / 60, s % 60)
-            lines.append("\(stamp) \(corrected[segment.id] ?? segment.text)")
+            let text = corrected[segment.id] ?? segment.text
+            if hasSpeakers {
+                // Dialog form: name header when the speaker changes, then lines.
+                let speaker = segment.speaker ?? "Unknown"
+                if speaker != lastSpeaker {
+                    lines.append("")
+                    lines.append("**\(speaker)**")
+                    lastSpeaker = speaker
+                }
+                lines.append("\(stamp) \(text)")
+            } else {
+                lines.append("\(stamp) \(text)")
+            }
         }
         let url = dir.appending(path: "transcript.md")
         do {

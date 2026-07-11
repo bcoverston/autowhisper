@@ -11,18 +11,22 @@ struct TranscriptView: View {
     let isLive: Bool
     let mode: TranscriptMode
     let searchText: String
+    var onTagSpeaker: ((String) -> Void)?
 
     @State private var hoveredID: Int?
 
-    private var visible: [(segment: DraftSegment, paragraphBreak: Bool)] {
+    private var visible: [(segment: DraftSegment, paragraphBreak: Bool, speakerHeader: String?)] {
         let matching = searchText.isEmpty
             ? segments
             : segments.filter {
                 displayText(for: $0).localizedCaseInsensitiveContains(searchText)
             }
         return matching.enumerated().map { index, segment in
-            let gap = index > 0 && segment.t0_ms - matching[index - 1].t1_ms > 2_000
-            return (segment, gap)
+            let prev = index > 0 ? matching[index - 1] : nil
+            let gap = prev != nil && segment.t0_ms - prev!.t1_ms > 2_000
+            // Show a speaker header when the speaker changes.
+            let header = segment.speaker != nil && segment.speaker != prev?.speaker ? segment.speaker : nil
+            return (segment, gap, header)
         }
     }
 
@@ -39,6 +43,10 @@ struct TranscriptView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(visible, id: \.segment.id) { entry in
+                        if let header = entry.speakerHeader {
+                            speakerHeader(header)
+                                .padding(.top, entry.paragraphBreak ? 14 : 8)
+                        }
                         SegmentRow(segment: entry.segment,
                                    text: displayText(for: entry.segment),
                                    isCorrected: corrections[entry.segment.id].map { $0 != entry.segment.text } ?? false,
@@ -46,7 +54,7 @@ struct TranscriptView: View {
                                    showDraftMarkers: mode == .draft,
                                    searchText: searchText,
                                    hovered: hoveredID == entry.segment.id)
-                            .padding(.top, entry.paragraphBreak ? 14 : 0)
+                            .padding(.top, entry.speakerHeader == nil && entry.paragraphBreak ? 14 : 0)
                             .onHover { hoveredID = $0 ? entry.segment.id : nil }
                     }
                 }
@@ -60,6 +68,20 @@ struct TranscriptView: View {
 
     private func displayText(for segment: DraftSegment) -> String {
         mode == .corrected ? (corrections[segment.id] ?? segment.text) : segment.text
+    }
+
+    private func speakerHeader(_ label: String) -> some View {
+        HStack(spacing: 6) {
+            SpeakerChip(label: label)
+            if !SpeakerColor.isMatched(label), let onTagSpeaker {
+                Button("tag") { onTagSpeaker(label) }
+                    .buttonStyle(.borderless)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.leading, 55)
     }
 }
 
