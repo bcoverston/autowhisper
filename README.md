@@ -4,6 +4,8 @@ A macOS menu-bar app that records your microphone and all system audio, then
 turns them into a corrected transcript — locally, with your own Claude
 subscription doing the final polish.
 
+![autowhisper main window: live recording with streaming transcript, per-source status, and session sidebar](docs/screenshot.png)
+
 - **One-click capture** of everything you hear and say: system audio via a
   Core Audio process tap, microphone via AVAudioEngine, mixed to one track
 - **Honest mic control** — the microphone toggle genuinely starts/stops the
