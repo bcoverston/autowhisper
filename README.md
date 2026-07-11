@@ -8,16 +8,25 @@ subscription doing the final polish.
 
 - **One-click capture** of everything you hear and say: system audio via a
   Core Audio process tap, microphone via AVAudioEngine, mixed to one track
+- **Ambient always-on mode** — records continuously, auto-splits sessions at
+  long silences / day boundaries, resumes at login, discards empty stretches
+- **Speaker attribution** — on-device diarization (FluidAudio) labels who's
+  talking; tag a voice once and future sessions auto-label it via a persistent
+  256-d voice fingerprint (all local)
+- **Per-session intelligence** — Claude writes a title, summary, action items,
+  and topics for each session; on-demand daily digests
 - **Honest mic control** — the microphone toggle genuinely starts/stops the
   hardware, so the macOS orange indicator always tells the truth
-- **Near-real-time transcription** streaming into the UI as you record
 - **Two-model accuracy**: fast `base.en` drafts every segment with a
   confidence score; low-confidence spans are re-transcribed with
   `large-v3-turbo` and the `claude` CLI arbitrates the hypotheses
+- **Survives real life**: rebuilds capture when you connect AirPods / change
+  the output device, and keeps an honest timeline across sleep/wake
 - **Tiny archives**: AAC-LC 16 kHz mono ≈ 12 MB/hour, 5-minute chunks,
   rolling 30-day audio retention — transcripts are kept forever
 - **A real UI**: live meters and pipeline counters, Draft/Corrected views,
-  transcript search, session search, rename/delete, copy/export
+  speaker chips, click-a-segment playback, transcript + session search,
+  rename/delete, copy/export, a Voices library
 
 ## How it works
 
@@ -145,6 +154,10 @@ MIT licensed (see LICENSE). Built on:
 - [whisper.cpp](https://github.com/ggml-org/whisper.cpp) (MIT) — bundled as a
   prebuilt xcframework at build time; releases embedding it must carry its
   copyright notice
+- [FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache-2.0) —
+  on-device diarization + speaker embeddings (CoreML). Its WeSpeaker embedding
+  model is trained on [VoxCeleb](https://www.robots.ox.ac.uk/~vgg/data/voxceleb/)
+  (CC-BY-4.0); models are downloaded at runtime, not redistributed
 - [Whisper models](https://github.com/openai/whisper) (MIT, OpenAI) and
   [Silero VAD](https://github.com/snakers4/silero-vad) (MIT) — downloaded at
   runtime, not redistributed

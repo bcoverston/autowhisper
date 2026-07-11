@@ -15,6 +15,11 @@ swift build -c release --package-path "$ROOT" --product "$PRODUCT"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/$PRODUCT"
+ICON_LINE=""
+if [[ -f "$ROOT/Resources/autowhisper.icns" ]]; then
+    cp "$ROOT/Resources/autowhisper.icns" "$APP/Contents/Resources/autowhisper.icns"
+    ICON_LINE="<key>CFBundleIconFile</key><string>autowhisper</string>"
+fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,6 +34,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>26.0</string>
     <key>LSUIElement</key><true/>
+    $ICON_LINE
     <key>NSMicrophoneUsageDescription</key>
     <string>autowhisper records the microphone to transcribe your sessions.</string>
     <key>NSAudioCaptureUsageDescription</key>

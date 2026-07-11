@@ -12,6 +12,8 @@ struct TranscriptView: View {
     let mode: TranscriptMode
     let searchText: String
     var onTagSpeaker: ((String) -> Void)?
+    var player: SegmentPlayer?
+    var sessionDir: URL?
 
     @State private var hoveredID: Int?
 
@@ -53,7 +55,10 @@ struct TranscriptView: View {
                                    rechecked: recheckedIDs.contains(entry.segment.id),
                                    showDraftMarkers: mode == .draft,
                                    searchText: searchText,
-                                   hovered: hoveredID == entry.segment.id)
+                                   hovered: hoveredID == entry.segment.id,
+                                   canPlay: sessionDir != nil,
+                                   isPlaying: player?.playingID == entry.segment.id,
+                                   onPlay: { if let dir = sessionDir { player?.toggle(entry.segment, sessionDir: dir) } })
                             .padding(.top, entry.speakerHeader == nil && entry.paragraphBreak ? 14 : 0)
                             .onHover { hoveredID = $0 ? entry.segment.id : nil }
                     }
@@ -93,15 +98,31 @@ struct SegmentRow: View {
     let showDraftMarkers: Bool
     let searchText: String
     let hovered: Bool
+    var canPlay = false
+    var isPlaying = false
+    var onPlay: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Rectangle()
                 .fill(showDraftMarkers && segment.flagged ? Color.orange : .clear)
                 .frame(width: 3)
+            // Play control appears on hover (or while playing); reserves gutter width.
+            Group {
+                if canPlay, hovered || isPlaying {
+                    Button { onPlay?() } label: {
+                        Image(systemName: isPlaying ? "stop.fill" : "play.fill").font(.caption2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help(isPlaying ? "Stop" : "Play this segment")
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: 14)
             Text(timestamp)
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(isPlaying ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
                 .frame(width: 44, alignment: .trailing)
             Text(highlighted)
                 .font(.body)

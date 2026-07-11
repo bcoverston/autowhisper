@@ -16,6 +16,11 @@ struct SessionView: View {
     @State private var searchText = ""
     @State private var taggingLabel: String?
     @State private var tagName = ""
+    @State private var player = SegmentPlayer()
+
+    private var currentDir: URL? {
+        app.summaries.first(where: { $0.id == sessionID })?.dir ?? (app.live?.id == sessionID ? app.live?.dir : nil)
+    }
 
     struct LoadedSession {
         let id: String
@@ -44,6 +49,7 @@ struct SessionView: View {
                                        description: Text("Pick a session, or start recording from the menu bar."))
             }
         }
+        .onChange(of: sessionID) { _, _ in player.stop() }
         .task(id: sessionID) {
             guard let sessionID, app.live?.id != sessionID,
                   let summary = app.summaries.first(where: { $0.id == sessionID }) else { return }
@@ -75,7 +81,9 @@ struct SessionView: View {
             TranscriptView(segments: segments, recheckedIDs: recheckedIDs,
                            corrections: corrections, isLive: isLive,
                            mode: mode, searchText: searchText,
-                           onTagSpeaker: { taggingLabel = $0; tagName = "" })
+                           onTagSpeaker: { taggingLabel = $0; tagName = "" },
+                           player: player,
+                           sessionDir: audioExpired ? nil : currentDir)
             Divider()
             ArtifactBar(artifacts: artifacts, audioExpired: audioExpired)
         }
