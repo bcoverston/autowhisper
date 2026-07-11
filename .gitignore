@@ -4,3 +4,6 @@ dist/
 .DS_Store
 Spikes/out/
 .deps/
+
+# design reference (large, viewable in browser)
+docs/design/AutoWhisper-UX-screens.html
