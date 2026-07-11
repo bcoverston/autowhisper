@@ -70,6 +70,23 @@ public enum SessionStatus: String, Codable, Sendable {
     case recording, finished, interrupted
 }
 
+public struct Artifact: Identifiable, Sendable, Equatable {
+    public enum Kind: Sendable {
+        case transcript, jsonl, audioChunk
+    }
+
+    public let name: String
+    public let url: URL
+    public let kind: Kind
+    public var id: URL { url }
+
+    public init(name: String, url: URL, kind: Kind) {
+        self.name = name
+        self.url = url
+        self.kind = kind
+    }
+}
+
 public enum PipelineEvent: Sendable {
     case sessionStarted(id: String, dir: URL)
     case levels(mic: Float, system: Float)      // ≤10 Hz, throttled at source

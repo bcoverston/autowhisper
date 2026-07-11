@@ -9,7 +9,7 @@ let package = Package(
         .executableTarget(
             name: "autowhisper",
             dependencies: ["Events"],
-            path: "Sources/App"
+            path: "Sources/autowhisper"
         ),
         .executableTarget(name: "spike-tap", path: "Spikes/tap"),
         .executableTarget(name: "spike-encode", path: "Spikes/encode"),
