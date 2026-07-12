@@ -8,11 +8,17 @@ import SwiftUI
 /// bundled templates are missing, and shows a warning glyph on issues.
 struct MenuBarLabel: View {
     @Bindable var app: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         content
             .task {
                 PolicyHook.shared.install()
+                if CommandLine.arguments.contains("--open-window") {
+                    try? await Task.sleep(for: .seconds(1))
+                    openWindow(id: "main")
+                    PolicyHook.shared.windowOpened()
+                }
                 await AutoTest.runIfRequested(app)
             }
     }

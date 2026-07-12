@@ -43,6 +43,7 @@ final class CaptureEngine: @unchecked Sendable {
     private var zeroDeliveredSeconds = 0.0
     private var lastWatchdogRebuildNs: UInt64 = 0
     private var tapIssueRaised = false
+    private var everSawSystemAudio = false
     private var sleepObservers: [Any] = []
 
     init(hub: EventHub) {
@@ -213,30 +214,32 @@ final class CaptureEngine: @unchecked Sendable {
             micActive: mic.isRunning))
     }
 
-    /// Delivered-but-all-zero buffers signal the Bluetooth renegotiation
-    /// failure (or revoked TCC) — an idle device delivers nothing instead.
-    /// One rebuild attempt per 10 min; a second silent stretch raises an issue.
-    /// When real audio returns, the issue is cleared so the banner doesn't stick.
+    /// Silence handling for the always-on tap. Steady-state silence is NORMAL —
+    /// it just means nothing is playing on the Mac (you may be capturing the room
+    /// via mic) — so it must NOT raise a user banner. We only treat silence as a
+    /// fault if real system audio had previously been captured and then dropped
+    /// out (a regression, e.g. Bluetooth device sleep), and even then we attempt
+    /// one silent rebuild rather than nagging. Device changes are handled by the
+    /// property listener; this is only a backstop.
     private func watchdog(deliveredZeros: Bool, seconds: Double) {
         guard deliveredZeros else {
+            everSawSystemAudio = true
             zeroDeliveredSeconds = 0
-            if tapIssueRaised {
+            if tapIssueRaised {                 // clear any stale banner from a prior build
                 tapIssueRaised = false
                 hub.emit(.resolved(.tapInvalidated))
             }
             return
         }
+        guard everSawSystemAudio else { zeroDeliveredSeconds = 0; return }   // never played → not a fault
         zeroDeliveredSeconds += seconds
-        guard zeroDeliveredSeconds >= 5 else { return }
+        guard zeroDeliveredSeconds >= 8 else { return }
         zeroDeliveredSeconds = 0
         let now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         if now - lastWatchdogRebuildNs > 600 * 1_000_000_000 {
             lastWatchdogRebuildNs = now
-            rebuildNow()
-        } else {
-            hub.emit(.failure(.tapInvalidated,
-                              detail: "system audio is delivering silence; check Screen & System Audio Recording permission"))
-            tapIssueRaised = true
+            everSawSystemAudio = false          // require re-confirmation after the recovery attempt
+            rebuildNow()                        // silent; only surfaces a banner if the rebuild itself fails
         }
     }
 

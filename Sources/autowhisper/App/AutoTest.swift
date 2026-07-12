@@ -16,6 +16,18 @@ enum AutoTest {
             if app.recording == .idle { break }
             try? await Task.sleep(for: .seconds(0.5))
         }
+        // --tag-test: exercise the real tagging path — tag the most-spoken
+        // speaker in the just-finished session as "TestSpeaker" (enrolls a
+        // VoiceProfile). A shell then checks speakers.json was written.
+        if CommandLine.arguments.contains("--tag-test"), let summary = app.summaries.first {
+            let segments = SessionStore.loadDraftSegments(dir: summary.dir)
+            let labels = segments.compactMap(\.speaker)
+            if let top = Dictionary(grouping: labels, by: { $0 })
+                .max(by: { $0.value.count < $1.value.count })?.key {
+                app.tagSpeaker(label: top, as: "TestSpeaker", in: summary.dir)
+                try? await Task.sleep(for: .seconds(3))   // let the detached enroll finish
+            }
+        }
         NSApp.terminate(nil)
     }
 }

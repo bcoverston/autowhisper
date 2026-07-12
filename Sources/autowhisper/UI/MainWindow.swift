@@ -24,5 +24,12 @@ struct MainWindow: View {
         .onChange(of: app.live?.id) { _, newID in
             if let newID { selectedSessionID = newID }
         }
+        .onChange(of: app.summaries.map(\.id)) { _, _ in
+            // --open-window dev hook: auto-select the newest past session so a
+            // populated transcript is visible for screenshot verification.
+            if CommandLine.arguments.contains("--open-window"), selectedSessionID == nil {
+                selectedSessionID = app.summaries.first { $0.id != app.live?.id }?.id
+            }
+        }
     }
 }

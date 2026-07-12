@@ -190,7 +190,13 @@ final class AppModel {
     /// voice so future sessions auto-label, and relabel this session's segments.
     func tagSpeaker(label: String, as name: String, in dir: URL) {
         Task.detached {
-            guard let embedding = SessionStore.loadSpeakerEmbeddings(dir: dir)[label] else { return }
+            guard let embedding = SessionStore.loadSpeakerEmbeddings(dir: dir)[label] else {
+                await MainActor.run {
+                    self.issues.append(Issue(kind: .modelMissing,
+                        detail: "no voice sample for \(label) yet — wait for a bit more speech, then tag again"))
+                }
+                return
+            }
             await SpeakerStore.shared.enroll(name: name, embedding: embedding)
             SessionStore.relabelSpeaker(dir: dir, from: label, to: name)
             await MainActor.run {

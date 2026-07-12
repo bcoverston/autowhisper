@@ -100,7 +100,16 @@ actor VADChunker {
 
             try draftLog.append(segments)               // disk first…
             hub.emit(.draftSegments(segments))          // …event second
-            if !speakers.isEmpty { hub.emit(.speakersAttributed(speakers)) }
+            if !speakers.isEmpty {
+                hub.emit(.speakersAttributed(speakers))
+                // Persist embeddings incrementally so tagging works mid-session
+                // (not only after a clean finish — many sessions are interrupted).
+                let embeddings = await attributor.sessionSpeakers()
+                if !embeddings.isEmpty {
+                    try? JSONEncoder().encode(embeddings)
+                        .write(to: sessionDir.appending(path: "speaker-embeddings.json"))
+                }
+            }
             if !segments.isEmpty {
                 await orchestrator.enqueue(segments, window: window, windowOffsetMs: offsetMs)
             }
