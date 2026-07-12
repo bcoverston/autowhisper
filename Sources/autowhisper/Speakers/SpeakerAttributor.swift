@@ -125,6 +125,25 @@ actor SpeakerAttributor {
         return ((passesThreshold && passesMargin) ? top.name : nil, top.sim, runnerUp, top.name)
     }
 
+    /// Keep labeling a voice as `to` for the rest of the session — used when the
+    /// user tags or corrects it, so new speech doesn't revert to the old label.
+    func relabelLive(from: String, to: String) {
+        for (fluidID, label) in labelForFluidID where label == from {
+            labelForFluidID[fluidID] = to
+        }
+        if let embedding = embeddingForLabel.removeValue(forKey: from) {
+            embeddingForLabel[to] = embedding
+        }
+    }
+
+    /// The user rejected an auto-match to `name`: relabel that voice to `fresh`
+    /// (the same "Speaker N" the past segments were moved to, so it stays
+    /// consistent) and drop the wrong profile from the match candidates.
+    func reject(name: String, relabelTo fresh: String) {
+        cachedProfiles.removeAll { $0.displayName == name }
+        relabelLive(from: name, to: fresh)
+    }
+
     /// The embedding last seen for a display label — used when the user tags it.
     func embedding(for label: String) -> [Float]? { embeddingForLabel[label] }
 

@@ -8,3 +8,4 @@ Spikes/out/
 # design reference (large, viewable in browser)
 docs/design/AutoWhisper-UX-screens.html
 Resources/autowhisper.iconset/
+__pycache__/

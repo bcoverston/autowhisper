@@ -33,6 +33,16 @@ actor VADChunker {
         self.attributor = SpeakerAttributor(session: sessionDir.lastPathComponent)
     }
 
+    /// Forward live speaker corrections to the diarizer so new speech is labeled
+    /// consistently (tag/reassign → new name; misidentified → fresh "Speaker N").
+    func rejectSpeaker(name: String, relabelTo fresh: String) async {
+        await attributor.reject(name: name, relabelTo: fresh)
+    }
+
+    func relabelSpeaker(from: String, to: String) async {
+        await attributor.relabelLive(from: from, to: to)
+    }
+
     func run(_ stream: AsyncStream<[Float]>) async {
         for await block in stream {
             pending.append(contentsOf: block)

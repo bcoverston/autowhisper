@@ -87,15 +87,18 @@ def make_app_icon():
     print("wrote Resources/autowhisper.icns + icon-1024.png")
 
 
-def make_menubar_glyph(filled):
-    """Monochrome template glyph at 36px (18pt @2x). Black on transparent."""
+def make_menubar_glyph(state):
+    """Monochrome template glyph at 36px (18pt @2x), black on transparent.
+    state: 'idle' (hollow node), 'auto' (hollow node + listening halo),
+    'rec' (filled node)."""
     S = 36
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     black = (0, 0, 0, 255)
     cx, cy = S / 2, S / 2
     n = 3
-    bw = 2.4 if not filled else 3.0
+    filled = state == "rec"
+    bw = 3.0 if filled else 2.4
     gap = 3.4
     profile = [0.34, 0.62, 1.0]
     for side in (-1, 1):
@@ -110,12 +113,16 @@ def make_menubar_glyph(filled):
         d.ellipse([cx - nd, cy - nd, cx + nd, cy + nd], fill=black)
     else:
         d.ellipse([cx - nd, cy - nd, cx + nd, cy + nd], outline=black, width=2)
-    name = "menubar-rec" if filled else "menubar-idle"
+    if state == "auto":
+        # "listening" halo: a concentric ring around the node (always-on, armed).
+        r = nd + 3.4
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=black, width=1)
+    name = {"idle": "menubar-idle", "auto": "menubar-auto", "rec": "menubar-rec"}[state]
     img.save(os.path.join(RES, f"{name}.png"))
     print(f"wrote Resources/{name}.png")
 
 
 if __name__ == "__main__":
     make_app_icon()
-    make_menubar_glyph(filled=False)
-    make_menubar_glyph(filled=True)
+    for state in ("idle", "auto", "rec"):
+        make_menubar_glyph(state)

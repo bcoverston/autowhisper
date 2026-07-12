@@ -188,35 +188,40 @@ final class AppModel {
 
     /// Tag a session speaker label ("Speaker 1") with a name ("Ben"): enroll the
     /// voice so future sessions auto-label, and relabel this session's segments.
-    func tagSpeaker(label: String, as name: String, in dir: URL) {
-        Task.detached {
-            guard let embedding = SessionStore.loadSpeakerEmbeddings(dir: dir)[label] else {
-                await MainActor.run {
-                    self.issues.append(Issue(kind: .modelMissing,
-                        detail: "no voice sample for \(label) yet — wait for a bit more speech, then tag again"))
-                }
-                return
-            }
+    /// Returns the applied name on success (for the caller to relabel its view in
+    /// place), or nil if there's no voice sample yet.
+    func tagSpeaker(label: String, as name: String, in dir: URL) async -> String? {
+        guard let embedding = await Task.detached(operation: {
+            SessionStore.loadSpeakerEmbeddings(dir: dir)[label]
+        }).value else {
+            issues.append(Issue(kind: .modelMissing,
+                detail: "no voice sample for \(label) yet — wait for a bit more speech, then tag again"))
+            return nil
+        }
+        await Task.detached {
             await SpeakerStore.shared.enroll(name: name, embedding: embedding)
             SessionStore.relabelSpeaker(dir: dir, from: label, to: name)
             await MatchLog.shared.record(MatchCorrection(
                 ts: .now, session: dir.lastPathComponent, fromLabel: label, toLabel: name,
                 action: label.hasPrefix("Speaker ") ? "tagged" : "reassigned"))
-            await MainActor.run {
-                guard self.live?.dir == dir, var segments = self.live?.segments else { return }
-                for i in segments.indices where segments[i].speaker == label {
-                    segments[i].speaker = name
-                }
-                self.live?.segments = segments      // local RHS — no overlapping access to `live`
+        }.value
+        if self.live?.dir == dir, var segments = self.live?.segments {
+            for i in segments.indices where segments[i].speaker == label {
+                segments[i].speaker = name
             }
+            self.live?.segments = segments      // local RHS — no overlapping access to `live`
+            // Keep new speech from this voice labeled with the tagged name.
+            await pipeline?.relabelSpeaker(from: label, to: name)
         }
+        return name
     }
 
     /// The cross-session matcher wrongly labeled this speaker with an enrolled
     /// name. Relabel it back to a fresh "Speaker N" for this session (no enroll —
     /// the named profile is left untouched), so the user can re-tag it correctly.
-    func markSpeakerMisidentified(label: String, in dir: URL) {
-        Task.detached {
+    /// Returns the fresh "Speaker N" label the segments were relabeled to.
+    func markSpeakerMisidentified(label: String, in dir: URL) async -> String {
+        let fresh: String = await Task.detached {
             let used = Set(SessionStore.loadDraftSegments(dir: dir).compactMap(\.speaker))
             var n = 1
             while used.contains("Speaker \(n)") { n += 1 }
@@ -226,14 +231,17 @@ final class AppModel {
             await MatchLog.shared.record(MatchCorrection(
                 ts: .now, session: dir.lastPathComponent, fromLabel: label, toLabel: fresh,
                 action: "misidentified"))
-            await MainActor.run {
-                guard self.live?.dir == dir, var segments = self.live?.segments else { return }
-                for i in segments.indices where segments[i].speaker == label {
-                    segments[i].speaker = fresh
-                }
-                self.live?.segments = segments
+            return fresh
+        }.value
+        if self.live?.dir == dir, var segments = self.live?.segments {
+            for i in segments.indices where segments[i].speaker == label {
+                segments[i].speaker = fresh
             }
+            self.live?.segments = segments
+            // Keep new speech from this voice consistent with the correction.
+            await pipeline?.rejectSpeaker(name: label, relabelTo: fresh)
         }
+        return fresh
     }
 
     func voiceProfiles() async -> [VoiceProfile] { await SpeakerStore.shared.all() }
@@ -366,6 +374,7 @@ final class AppModel {
 /// `stop()` drains every stage, finalizes session.json, and emits sessionEnded.
 final class Pipeline: Sendable {
     private let engine: CaptureEngine
+    private let chunker: VADChunker
     private let archiveTask: Task<Void, Never>
     private let chunkerTask: Task<Void, Never>
     private let orchestrator: CorrectionOrchestrator
@@ -391,14 +400,16 @@ final class Pipeline: Sendable {
         let archiveTask = Task { await archive.run(archivePCM) }
         let chunkerTask = Task { await chunker.run(chunkerPCM) }
         hub.emit(.sessionStarted(id: id, dir: dir))
-        return Pipeline(engine: engine, archiveTask: archiveTask, chunkerTask: chunkerTask,
-                        orchestrator: orchestrator, hub: hub, id: id, dir: dir)
+        return Pipeline(engine: engine, chunker: chunker, archiveTask: archiveTask,
+                        chunkerTask: chunkerTask, orchestrator: orchestrator,
+                        hub: hub, id: id, dir: dir)
     }
 
-    private init(engine: CaptureEngine, archiveTask: Task<Void, Never>,
+    private init(engine: CaptureEngine, chunker: VADChunker, archiveTask: Task<Void, Never>,
                  chunkerTask: Task<Void, Never>, orchestrator: CorrectionOrchestrator,
                  hub: EventHub, id: String, dir: URL) {
         self.engine = engine
+        self.chunker = chunker
         self.archiveTask = archiveTask
         self.chunkerTask = chunkerTask
         self.orchestrator = orchestrator
@@ -410,6 +421,16 @@ final class Pipeline: Sendable {
 
     func setMicEnabled(_ enabled: Bool) {
         engine.setMicEnabled(enabled)
+    }
+
+    /// Live speaker corrections forwarded to the diarizer so new speech follows
+    /// the correction instead of reverting to the old auto-label.
+    func rejectSpeaker(name: String, relabelTo fresh: String) async {
+        await chunker.rejectSpeaker(name: name, relabelTo: fresh)
+    }
+
+    func relabelSpeaker(from: String, to: String) async {
+        await chunker.relabelSpeaker(from: from, to: to)
     }
 
     func stop() async {

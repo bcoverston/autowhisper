@@ -28,6 +28,9 @@ struct MenuBarLabel: View {
             Image(systemName: "exclamationmark.triangle")
         } else if case .recording = app.recording {
             templateImage("menubar-rec") ?? Image(systemName: "waveform.circle.fill")
+        } else if app.ambientMode {
+            // Ambient on but between sessions: armed/listening (halo glyph).
+            templateImage("menubar-auto") ?? Image(systemName: "waveform.circle")
         } else {
             templateImage("menubar-idle") ?? Image(systemName: "waveform.circle")
         }

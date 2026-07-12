@@ -37,6 +37,27 @@ actor MatchLog {
     func record(_ decision: MatchDecision) { append(decision, to: "match-decisions.jsonl") }
     func record(_ correction: MatchCorrection) { append(correction, to: "match-corrections.jsonl") }
 
+    /// Labels currently flagged as misidentified in a session, replayed from the
+    /// correction log: a `misidentified` flags its new label; a later `tagged` /
+    /// `reassigned` of a label clears it. Single source of truth for the badge —
+    /// so marks made before the badge existed still surface.
+    static func misidentifiedLabels(session: String) -> Set<String> {
+        guard let data = try? Data(contentsOf: SessionStore.root.appending(path: "match-corrections.jsonl"))
+        else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let corrections = data.split(separator: 0x0a)
+            .compactMap { try? decoder.decode(MatchCorrection.self, from: $0) }
+            .filter { $0.session == session }
+            .sorted { $0.ts < $1.ts }
+        var flagged: Set<String> = []
+        for c in corrections {
+            if c.action == "misidentified" { flagged.insert(c.toLabel) }
+            else { flagged.remove(c.fromLabel) }   // tagged / reassigned clears it
+        }
+        return flagged
+    }
+
     private func append<T: Encodable>(_ value: T, to name: String) {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

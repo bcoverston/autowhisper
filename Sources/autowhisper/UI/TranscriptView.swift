@@ -15,10 +15,14 @@ struct TranscriptView: View {
     var onAssignSpeaker: ((String, String) -> Void)?
     var onMarkMisidentified: ((String) -> Void)?
     var knownVoices: [String] = []
+    var misidentifiedLabels: Set<String> = []
     var player: SegmentPlayer?
     var sessionDir: URL?
 
     @State private var hoveredID: Int?
+    @State private var atBottom = true
+    @State private var unseen = 0
+    private let bottomID = "transcript-bottom"
 
     private var visible: [(segment: DraftSegment, paragraphBreak: Bool, speakerHeader: String?)] {
         let matching = searchText.isEmpty
@@ -49,33 +53,67 @@ struct TranscriptView: View {
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 64)
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(visible, id: \.segment.id) { entry in
-                        if let header = entry.speakerHeader {
-                            speakerHeader(header)
-                                .padding(.top, entry.paragraphBreak ? 14 : 8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(visible, id: \.segment.id) { entry in
+                            if let header = entry.speakerHeader {
+                                speakerHeader(header)
+                                    .padding(.top, entry.paragraphBreak ? 14 : 8)
+                            }
+                            SegmentRow(segment: entry.segment,
+                                       text: displayText(for: entry.segment),
+                                       isCorrected: corrections[entry.segment.id].map { $0 != entry.segment.text } ?? false,
+                                       rechecked: recheckedIDs.contains(entry.segment.id),
+                                       showDraftMarkers: mode == .draft,
+                                       searchText: searchText,
+                                       hovered: hoveredID == entry.segment.id,
+                                       canPlay: sessionDir != nil,
+                                       isPlaying: player?.playingID == entry.segment.id,
+                                       onPlay: { if let dir = sessionDir { player?.toggle(entry.segment, sessionDir: dir) } })
+                                .padding(.top, entry.speakerHeader == nil && entry.paragraphBreak ? 14 : 0)
+                                .onHover { hoveredID = $0 ? entry.segment.id : nil }
                         }
-                        SegmentRow(segment: entry.segment,
-                                   text: displayText(for: entry.segment),
-                                   isCorrected: corrections[entry.segment.id].map { $0 != entry.segment.text } ?? false,
-                                   rechecked: recheckedIDs.contains(entry.segment.id),
-                                   showDraftMarkers: mode == .draft,
-                                   searchText: searchText,
-                                   hovered: hoveredID == entry.segment.id,
-                                   canPlay: sessionDir != nil,
-                                   isPlaying: player?.playingID == entry.segment.id,
-                                   onPlay: { if let dir = sessionDir { player?.toggle(entry.segment, sessionDir: dir) } })
-                            .padding(.top, entry.speakerHeader == nil && entry.paragraphBreak ? 14 : 0)
-                            .onHover { hoveredID = $0 ? entry.segment.id : nil }
+                        // Bottom sentinel: its visibility tells us whether the user
+                        // is at the latest message, and it's the scroll target.
+                        Color.clear.frame(height: 1).id(bottomID)
+                            .onAppear { atBottom = true; withAnimation { unseen = 0 } }
+                            .onDisappear { atBottom = false }
                     }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: 780, alignment: .leading)
                 }
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
-                .frame(maxWidth: 780, alignment: .leading)
+                .defaultScrollAnchor(isLive && searchText.isEmpty ? .bottom : .top)
+                .onChange(of: segments.count) { old, new in
+                    if isLive, !atBottom, new > old { withAnimation { unseen += new - old } }
+                }
+                .overlay(alignment: .bottom) {
+                    if isLive, unseen > 0 { newMessagesToast(proxy) }
+                }
             }
-            .defaultScrollAnchor(isLive && searchText.isEmpty ? .bottom : .top)
         }
+    }
+
+    /// Appears while the user is scrolled up and new live segments arrive;
+    /// jumps to the latest on click.
+    private func newMessagesToast(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+            unseen = 0
+        } label: {
+            Label("Click to see latest messages", systemImage: "arrow.down")
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(.secondary.opacity(0.25)))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.tint)
+        .shadow(color: .black.opacity(0.15), radius: 5, y: 2)
+        .padding(.bottom, 14)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     private func displayText(for segment: DraftSegment) -> String {
@@ -86,6 +124,12 @@ struct TranscriptView: View {
         let matched = SpeakerColor.isMatched(label)
         return HStack(spacing: 6) {
             SpeakerChip(label: label)
+            if misidentifiedLabels.contains(label) {
+                Label("misidentified", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .help("You marked this auto-match as wrong — tag the correct speaker")
+            }
             if onTagSpeaker != nil {
                 Menu {
                     Button(matched ? "Reassign (not \(label))…" : "Tag as…") {

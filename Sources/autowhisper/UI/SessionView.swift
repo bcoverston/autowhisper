@@ -18,7 +18,7 @@ struct SessionView: View {
     @State private var tagName = ""
     @State private var player = SegmentPlayer()
     @State private var knownVoices: [String] = []
-    @State private var reloadToken = 0
+    @State private var misidentified: Set<String> = []
 
     private var currentDir: URL? {
         app.summaries.first(where: { $0.id == sessionID })?.dir ?? (app.live?.id == sessionID ? app.live?.dir : nil)
@@ -52,8 +52,12 @@ struct SessionView: View {
             }
         }
         .onChange(of: sessionID) { _, _ in player.stop() }
-        .task(id: "\(sessionID ?? "-")#\(reloadToken)") {
+        .task(id: sessionID) {
             knownVoices = await app.voiceProfiles().map(\.displayName)
+            if let dir = currentDir {
+                let sid = dir.lastPathComponent
+                misidentified = await Task.detached { MatchLog.misidentifiedLabels(session: sid) }.value
+            }
             guard let sessionID, app.live?.id != sessionID,
                   let summary = app.summaries.first(where: { $0.id == sessionID }) else { return }
             loaded = nil
@@ -71,11 +75,20 @@ struct SessionView: View {
         }
     }
 
-    /// A correction persists on a detached task; re-run the load shortly after so
-    /// a past session's transcript and the voice list reflect the change. (Live
-    /// sessions update in-memory immediately, so the guard above no-ops the load.)
-    private func afterCorrection() {
-        Task { try? await Task.sleep(for: .milliseconds(400)); reloadToken += 1 }
+    /// Reflect a speaker correction in the loaded transcript in place — no disk
+    /// reload, so the scroll position is preserved (segment ids are unchanged;
+    /// only the speaker label and the badge set move). Live sessions read
+    /// `app.live` directly and are already updated by the model.
+    private func applyRelabel(from: String, to: String, misidentifiedNow: Bool) {
+        if misidentifiedNow { misidentified.insert(to) }
+        misidentified.remove(from)
+        guard let l = loaded else { return }
+        let segments = l.segments.map { seg -> DraftSegment in
+            var seg = seg; if seg.speaker == from { seg.speaker = to }; return seg
+        }
+        loaded = LoadedSession(id: l.id, segments: segments, recheckedIDs: l.recheckedIDs,
+                               corrections: l.corrections, artifacts: l.artifacts,
+                               audioExpired: l.audioExpired, summary: l.summary)
     }
 
     private func content(segments: [DraftSegment], recheckedIDs: Set<Int>,
@@ -106,17 +119,24 @@ struct SessionView: View {
                            onTagSpeaker: { taggingLabel = $0; tagName = "" },
                            onAssignSpeaker: { label, name in
                                if let dir = currentDir {
-                                   app.tagSpeaker(label: label, as: name, in: dir)
-                                   afterCorrection()
+                                   Task {
+                                       if let applied = await app.tagSpeaker(label: label, as: name, in: dir) {
+                                           applyRelabel(from: label, to: applied, misidentifiedNow: false)
+                                           if !knownVoices.contains(applied) { knownVoices.append(applied) }
+                                       }
+                                   }
                                }
                            },
                            onMarkMisidentified: { label in
                                if let dir = currentDir {
-                                   app.markSpeakerMisidentified(label: label, in: dir)
-                                   afterCorrection()
+                                   Task {
+                                       let fresh = await app.markSpeakerMisidentified(label: label, in: dir)
+                                       applyRelabel(from: label, to: fresh, misidentifiedNow: true)
+                                   }
                                }
                            },
                            knownVoices: knownVoices,
+                           misidentifiedLabels: misidentified,
                            player: player,
                            sessionDir: audioExpired ? nil : currentDir)
             Divider()
@@ -129,8 +149,13 @@ struct SessionView: View {
             Button("Tag") {
                 if let label = taggingLabel, !tagName.isEmpty,
                    let dir = app.summaries.first(where: { $0.id == sessionID })?.dir ?? app.live?.dir {
-                    app.tagSpeaker(label: label, as: tagName, in: dir)
-                    afterCorrection()
+                    let name = tagName
+                    Task {
+                        if let applied = await app.tagSpeaker(label: label, as: name, in: dir) {
+                            applyRelabel(from: label, to: applied, misidentifiedNow: false)
+                            if !knownVoices.contains(applied) { knownVoices.append(applied) }
+                        }
+                    }
                 }
                 taggingLabel = nil
             }

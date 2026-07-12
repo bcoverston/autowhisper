@@ -24,8 +24,7 @@ enum AutoTest {
             let labels = segments.compactMap(\.speaker)
             if let top = Dictionary(grouping: labels, by: { $0 })
                 .max(by: { $0.value.count < $1.value.count })?.key {
-                app.tagSpeaker(label: top, as: "TestSpeaker", in: summary.dir)
-                try? await Task.sleep(for: .seconds(3))   // let the detached enroll finish
+                _ = await app.tagSpeaker(label: top, as: "TestSpeaker", in: summary.dir)
             }
         }
         NSApp.terminate(nil)
