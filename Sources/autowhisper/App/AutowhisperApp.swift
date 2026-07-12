@@ -6,6 +6,17 @@ struct AutowhisperApp: App {
     @State private var app = AppModel()
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    init() {
+        // Dev hook: validate the offline backend logic (SigV4 vector, Gemini
+        // schema sanitizing, OpenAI/Gemini response parsing) with no network.
+        if CommandLine.arguments.contains("--llm-selftest")
+            || CommandLine.arguments.contains("--sigv4-selftest") {
+            let ok = LLM.selfTest()
+            print("llm selftest: \(ok ? "PASS" : "FAIL")")
+            exit(ok ? 0 : 1)
+        }
+    }
+
     var body: some Scene {
         MenuBarExtra(content: {
             MenuContent(app: app)

@@ -12,6 +12,9 @@ struct TranscriptView: View {
     let mode: TranscriptMode
     let searchText: String
     var onTagSpeaker: ((String) -> Void)?
+    var onAssignSpeaker: ((String, String) -> Void)?
+    var onMarkMisidentified: ((String) -> Void)?
+    var knownVoices: [String] = []
     var player: SegmentPlayer?
     var sessionDir: URL?
 
@@ -39,8 +42,12 @@ struct TranscriptView: View {
                 systemImage: "text.quote",
                 description: Text(isLive ? "Draft segments appear here as they are transcribed."
                                          : "This session has no draft transcript."))
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, 64)
         } else if visible.isEmpty {
             ContentUnavailableView.search(text: searchText)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, 64)
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -76,13 +83,37 @@ struct TranscriptView: View {
     }
 
     private func speakerHeader(_ label: String) -> some View {
-        HStack(spacing: 6) {
+        let matched = SpeakerColor.isMatched(label)
+        return HStack(spacing: 6) {
             SpeakerChip(label: label)
-            if !SpeakerColor.isMatched(label), let onTagSpeaker {
-                Button("tag") { onTagSpeaker(label) }
-                    .buttonStyle(.borderless)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if onTagSpeaker != nil {
+                Menu {
+                    Button(matched ? "Reassign (not \(label))…" : "Tag as…") {
+                        onTagSpeaker?(label)
+                    }
+                    let others = knownVoices.filter { $0.caseInsensitiveCompare(label) != .orderedSame }
+                    if !others.isEmpty {
+                        Menu("Assign to") {
+                            ForEach(others, id: \.self) { name in
+                                Button(name) { onAssignSpeaker?(label, name) }
+                            }
+                        }
+                    }
+                    if matched {
+                        Divider()
+                        Button("Mark misidentified", role: .destructive) {
+                            onMarkMisidentified?(label)
+                        }
+                    }
+                } label: {
+                    Image(systemName: matched ? "pencil.circle" : "person.crop.circle.badge.plus")
+                        .font(.caption)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(.secondary)
+                .help(matched ? "Correct this speaker" : "Tag this speaker")
             }
             Spacer()
         }

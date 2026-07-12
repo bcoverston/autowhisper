@@ -17,6 +17,8 @@ struct SessionView: View {
     @State private var taggingLabel: String?
     @State private var tagName = ""
     @State private var player = SegmentPlayer()
+    @State private var knownVoices: [String] = []
+    @State private var reloadToken = 0
 
     private var currentDir: URL? {
         app.summaries.first(where: { $0.id == sessionID })?.dir ?? (app.live?.id == sessionID ? app.live?.dir : nil)
@@ -37,7 +39,7 @@ struct SessionView: View {
             if let live = app.live, live.id == sessionID {
                 content(segments: live.segments, recheckedIDs: live.recheckedIDs,
                         corrections: live.corrections, artifacts: live.closedArtifacts,
-                        audioExpired: false, isLive: true)
+                        audioExpired: false, isLive: true, chunksClosed: live.chunksClosed)
             } else if let loaded, loaded.id == sessionID {
                 content(segments: loaded.segments, recheckedIDs: loaded.recheckedIDs,
                         corrections: loaded.corrections, artifacts: loaded.artifacts,
@@ -50,7 +52,8 @@ struct SessionView: View {
             }
         }
         .onChange(of: sessionID) { _, _ in player.stop() }
-        .task(id: sessionID) {
+        .task(id: "\(sessionID ?? "-")#\(reloadToken)") {
+            knownVoices = await app.voiceProfiles().map(\.displayName)
             guard let sessionID, app.live?.id != sessionID,
                   let summary = app.summaries.first(where: { $0.id == sessionID }) else { return }
             loaded = nil
@@ -68,20 +71,52 @@ struct SessionView: View {
         }
     }
 
+    /// A correction persists on a detached task; re-run the load shortly after so
+    /// a past session's transcript and the voice list reflect the change. (Live
+    /// sessions update in-memory immediately, so the guard above no-ops the load.)
+    private func afterCorrection() {
+        Task { try? await Task.sleep(for: .milliseconds(400)); reloadToken += 1 }
+    }
+
     private func content(segments: [DraftSegment], recheckedIDs: Set<Int>,
                          corrections: [Int: String], artifacts: [Artifact],
                          audioExpired: Bool, isLive: Bool,
-                         summary: SessionSummaryDoc? = nil) -> some View {
+                         summary: SessionSummaryDoc? = nil,
+                         chunksClosed: Int = 0) -> some View {
         VStack(spacing: 0) {
             SessionHeader(app: app, sessionID: sessionID, segments: segments,
                           corrections: corrections, isLive: isLive,
                           mode: $mode, searchText: $searchText)
             Divider()
+            if !segments.isEmpty {
+                SessionTimeline(segments: segments, chunksClosed: chunksClosed,
+                                corrections: corrections, isLive: isLive,
+                                playingID: player.playingID,
+                                onSeek: { seg in
+                                    if !audioExpired, let dir = currentDir {
+                                        player.toggle(seg, sessionDir: dir)
+                                    }
+                                })
+                Divider()
+            }
             if let summary { SummaryCard(summary: summary) }
             TranscriptView(segments: segments, recheckedIDs: recheckedIDs,
                            corrections: corrections, isLive: isLive,
                            mode: mode, searchText: searchText,
                            onTagSpeaker: { taggingLabel = $0; tagName = "" },
+                           onAssignSpeaker: { label, name in
+                               if let dir = currentDir {
+                                   app.tagSpeaker(label: label, as: name, in: dir)
+                                   afterCorrection()
+                               }
+                           },
+                           onMarkMisidentified: { label in
+                               if let dir = currentDir {
+                                   app.markSpeakerMisidentified(label: label, in: dir)
+                                   afterCorrection()
+                               }
+                           },
+                           knownVoices: knownVoices,
                            player: player,
                            sessionDir: audioExpired ? nil : currentDir)
             Divider()
@@ -95,6 +130,7 @@ struct SessionView: View {
                 if let label = taggingLabel, !tagName.isEmpty,
                    let dir = app.summaries.first(where: { $0.id == sessionID })?.dir ?? app.live?.dir {
                     app.tagSpeaker(label: label, as: tagName, in: dir)
+                    afterCorrection()
                 }
                 taggingLabel = nil
             }

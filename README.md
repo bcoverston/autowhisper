@@ -106,8 +106,16 @@ corrected.jsonl   Claude's corrections (audit trail)
 transcript.md     final human-readable transcript (kept forever)
 ```
 
-Settings (⌘, from the main window): launch at login, retention days,
-re-check confidence threshold.
+Settings (⌘, from the main window): launch at login, retention days, ambient
+rollover (silence gap, max length, disk floor), correction interval, re-check
+confidence, and speaker matching (same-voice threshold + runner-up margin).
+
+Every auto-match decision and your corrections are logged locally
+(`match-decisions.jsonl` / `match-corrections.jsonl` in the app-support root).
+They never auto-tune the thresholds — they're a dataset. When enough accrues,
+`python3 Scripts/calibrate-matching.py` suggests threshold/margin values derived
+from your real corrections. See [docs/CALIBRATION.md](docs/CALIBRATION.md) for the
+method.
 
 ## Limitations
 

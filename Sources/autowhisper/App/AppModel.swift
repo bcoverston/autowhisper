@@ -199,18 +199,48 @@ final class AppModel {
             }
             await SpeakerStore.shared.enroll(name: name, embedding: embedding)
             SessionStore.relabelSpeaker(dir: dir, from: label, to: name)
+            await MatchLog.shared.record(MatchCorrection(
+                ts: .now, session: dir.lastPathComponent, fromLabel: label, toLabel: name,
+                action: label.hasPrefix("Speaker ") ? "tagged" : "reassigned"))
             await MainActor.run {
-                if self.live?.dir == dir {
-                    self.live?.segments = self.live!.segments.map {
-                        var s = $0; if s.speaker == label { s.speaker = name }; return s
-                    }
+                guard self.live?.dir == dir, var segments = self.live?.segments else { return }
+                for i in segments.indices where segments[i].speaker == label {
+                    segments[i].speaker = name
                 }
+                self.live?.segments = segments      // local RHS — no overlapping access to `live`
+            }
+        }
+    }
+
+    /// The cross-session matcher wrongly labeled this speaker with an enrolled
+    /// name. Relabel it back to a fresh "Speaker N" for this session (no enroll —
+    /// the named profile is left untouched), so the user can re-tag it correctly.
+    func markSpeakerMisidentified(label: String, in dir: URL) {
+        Task.detached {
+            let used = Set(SessionStore.loadDraftSegments(dir: dir).compactMap(\.speaker))
+            var n = 1
+            while used.contains("Speaker \(n)") { n += 1 }
+            let fresh = "Speaker \(n)"
+            SessionStore.relabelSpeaker(dir: dir, from: label, to: fresh)
+            await SpeakerStore.shared.markMisidentified(name: label)   // accuracy signal
+            await MatchLog.shared.record(MatchCorrection(
+                ts: .now, session: dir.lastPathComponent, fromLabel: label, toLabel: fresh,
+                action: "misidentified"))
+            await MainActor.run {
+                guard self.live?.dir == dir, var segments = self.live?.segments else { return }
+                for i in segments.indices where segments[i].speaker == label {
+                    segments[i].speaker = fresh
+                }
+                self.live?.segments = segments
             }
         }
     }
 
     func voiceProfiles() async -> [VoiceProfile] { await SpeakerStore.shared.all() }
     func forgetVoice(_ id: UUID) { Task { await SpeakerStore.shared.forget(id) } }
+    func speakerUsage() async -> [String: SpeakerUsage] {
+        await Task.detached { SessionStore.speakerUsage() }.value
+    }
 
     /// Build a markdown digest of a day's sessions and open it.
     func makeDigest(for day: Date) {
@@ -223,7 +253,7 @@ final class AppModel {
             guard !docs.isEmpty else { return }
             guard let text = try? await Summarizer.digest(of: docs) else {
                 await MainActor.run {
-                    self.hub.emit(.failure(.claudeCLIFailed, detail: "digest generation failed"))
+                    self.hub.emit(.failure(.correctionFailed, detail: "digest generation failed"))
                 }
                 return
             }

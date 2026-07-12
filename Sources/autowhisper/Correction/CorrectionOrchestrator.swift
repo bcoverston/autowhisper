@@ -3,11 +3,16 @@ import Foundation
 
 /// Correction pass: re-checks flagged segments with the large model (using the
 /// in-memory window audio — no chunk decoding), batches drafts every ~2 min,
-/// sends them to the claude CLI, and writes corrected.jsonl + transcript.md.
-/// Best-effort by design: failures surface as issues and never block drafting;
-/// transcript.md falls back to draft text for uncorrected segments.
+/// sends them to the configured correction backend, and writes corrected.jsonl
+/// + transcript.md. Best-effort by design: failures surface as issues and never
+/// block drafting; transcript.md falls back to draft text for uncorrected segments.
 actor CorrectionOrchestrator {
-    static let batchInterval: Duration = .seconds(120)
+    /// How often flagged/uncorrected drafts are batched to the correction backend.
+    /// User-tunable (Settings); lower = fresher corrections but more backend calls.
+    static var batchSeconds: Double {
+        let v = UserDefaults.standard.double(forKey: "correctionIntervalSeconds")
+        return v > 0 ? v : 120
+    }
     private static let slicePadding = 8_000            // 0.5 s @16k each side
 
     private let hub: EventHub
@@ -64,10 +69,11 @@ actor CorrectionOrchestrator {
         }
 
         if batchTask == nil && !finishing {
-            let nextAt = Date.now.addingTimeInterval(120)
+            let seconds = Self.batchSeconds
+            let nextAt = Date.now.addingTimeInterval(seconds)
             hub.emit(.correction(.batching(nextAt: nextAt)))
             batchTask = Task {
-                try? await Task.sleep(for: Self.batchInterval)
+                try? await Task.sleep(for: .seconds(seconds))
                 guard !Task.isCancelled else { return }
                 await self.flushBatch()
             }
@@ -109,7 +115,7 @@ actor CorrectionOrchestrator {
             hub.emit(.transcriptWritten(dir.appending(path: "summary.md")))
         } catch {
             // Summary is optional; surface as an issue but don't fail the session.
-            hub.emit(.failure(.claudeCLIFailed, detail: "summary: \(error.localizedDescription)"))
+            hub.emit(.failure(.correctionFailed, detail: "summary: \(error.localizedDescription)"))
         }
     }
 
@@ -120,23 +126,23 @@ actor CorrectionOrchestrator {
         uncorrected.removeAll()
         hub.emit(.correction(.running))
 
-        let payload = ClaudeCLI.Payload(segments: batch.map {
+        let payload = LLM.Payload(segments: batch.map {
             .init(id: $0.id, t0: $0.t0_ms, t1: $0.t1_ms, text: $0.text,
                   avg_p: $0.avg_p, no_speech_prob: $0.no_speech_prob,
                   alt_hypothesis: alternates[$0.id], speaker: $0.speaker)
         })
         do {
-            let result = try await ClaudeCLI.correct(payload)
+            let result = try await LLM.correct(payload)
             corrected.merge(result) { _, new in new }
             try? correctedLog.append(result.map { CorrectedEntry(id: $0.key, text: $0.value) }
                 .sorted { $0.id < $1.id })
             hub.emit(.correctionApplied(result))
-            hub.emit(.resolved(.claudeCLIFailed))
+            hub.emit(.resolved(.correctionFailed))
             hub.emit(.correction(.idle))
         } catch {
             // Put the batch back so the next flush (or finish) retries it once more.
             uncorrected.insert(contentsOf: batch, at: 0)
-            hub.emit(.failure(.claudeCLIFailed, detail: error.localizedDescription))
+            hub.emit(.failure(.correctionFailed, detail: error.localizedDescription))
             hub.emit(.correction(.failed(error.localizedDescription)))
         }
     }

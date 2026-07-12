@@ -44,7 +44,7 @@ extension Events.IssueKind {
         case .audioTapPermissionDenied: "System-audio access denied"
         case .tapInvalidated: "Audio capture failed"
         case .modelMissing: "Whisper model missing"
-        case .claudeCLIFailed: "Claude correction failed"
+        case .correctionFailed: "Correction failed"
         case .diskWriteFailed: "Disk write failed"
         }
     }

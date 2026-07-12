@@ -28,7 +28,7 @@ public enum IssueKind: Hashable, CaseIterable, Sendable {
     case audioTapPermissionDenied
     case tapInvalidated
     case modelMissing
-    case claudeCLIFailed
+    case correctionFailed
     case diskWriteFailed
 }
 

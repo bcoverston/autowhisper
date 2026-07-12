@@ -9,12 +9,15 @@ import Foundation
 /// the embedding matches (margin rule), otherwise a stable "Speaker N".
 /// Best-effort: if models can't load, attribution is skipped and speakers stay nil.
 actor SpeakerAttributor {
+    private let session: String                        // session id, for the calibration log
     private var diarizer: DiarizerManager?
     private var ready = false
     private var failed = false
     private var labelForFluidID: [String: String] = [:]
     private var embeddingForLabel: [String: [Float]] = [:]
     private var nextSpeakerN = 1
+
+    init(session: String) { self.session = session }
 
     /// Lazily load models and seed enrolled profiles as known speakers.
     private func prepare() async -> Bool {
@@ -79,8 +82,23 @@ actor SpeakerAttributor {
         if let existing = labelForFluidID[fluidID] { return existing }
         let embedding = diarizer.speakerManager.getSpeaker(for: fluidID)?.currentEmbedding
         var label: String
-        if let embedding, let profile = matchSync(embedding) {
-            label = profile
+        if let embedding {
+            let d = matchDecision(embedding)
+            if let name = d.name {
+                label = name
+            } else {
+                label = "Speaker \(nextSpeakerN)"
+                nextSpeakerN += 1
+            }
+            // Record the decision (only when there was something to match against)
+            // so the threshold/margin can be calibrated from real outcomes later.
+            if let candidate = d.candidate {
+                let entry = MatchDecision(
+                    ts: .now, session: session, assignedLabel: label, candidate: candidate,
+                    topSim: d.top, runnerUpSim: d.runnerUp, matched: d.name != nil,
+                    threshold: SpeakerStore.matchThreshold, marginGate: SpeakerStore.matchMargin)
+                Task { await MatchLog.shared.record(entry) }
+            }
         } else {
             label = "Speaker \(nextSpeakerN)"
             nextSpeakerN += 1
@@ -91,16 +109,20 @@ actor SpeakerAttributor {
     }
 
     // Synchronous match against a snapshot of profiles cached at prepare(),
-    // applying the same threshold + margin rule as SpeakerStore.match.
+    // applying the same threshold + margin rule as SpeakerStore.match. Returns
+    // the accepted name (or nil) plus the raw scores for the calibration log.
     private var cachedProfiles: [VoiceProfile] = []
-    private func matchSync(_ embedding: [Float]) -> String? {
-        guard !cachedProfiles.isEmpty else { return nil }
+    private func matchDecision(_ embedding: [Float])
+        -> (name: String?, top: Float, runnerUp: Float?, candidate: String?) {
+        guard !cachedProfiles.isEmpty else { return (nil, 0, nil, nil) }
         let scored = cachedProfiles
             .map { (name: $0.displayName, sim: SpeakerStore.cosine($0.centroid, embedding)) }
             .sorted { $0.sim > $1.sim }
-        guard scored[0].sim >= SpeakerStore.matchThreshold else { return nil }
-        if scored.count > 1, scored[0].sim - scored[1].sim < SpeakerStore.matchMargin { return nil }
-        return scored[0].name
+        let top = scored[0]
+        let runnerUp = scored.count > 1 ? scored[1].sim : nil
+        let passesThreshold = top.sim >= SpeakerStore.matchThreshold
+        let passesMargin = runnerUp == nil || (top.sim - runnerUp!) >= SpeakerStore.matchMargin
+        return ((passesThreshold && passesMargin) ? top.name : nil, top.sim, runnerUp, top.name)
     }
 
     /// The embedding last seen for a display label — used when the user tags it.

@@ -5,16 +5,24 @@ import Foundation
 /// conversation boundary), a hard length cap, or a calendar-day boundary.
 /// Pure logic — the owner drives capture start/stop from its verdict.
 struct AmbientPolicy {
-    // 10 min of quiet ends a session; overridable (defaults key) for testing.
+    // 10 min of quiet ends a session. User-tunable in minutes (Settings); a
+    // separate seconds key stays for testing overrides.
     static var silenceRollover: Double {
+        let minutes = UserDefaults.standard.double(forKey: "ambientSilenceMinutes")
+        if minutes > 0 { return minutes * 60 }
         let override = UserDefaults.standard.double(forKey: "silenceRolloverOverride")
         return override > 0 ? override : 600
     }
     static var maxSessionSeconds: Double {
+        let hours = UserDefaults.standard.double(forKey: "ambientMaxHours")
+        if hours > 0 { return hours * 3600 }
         let override = UserDefaults.standard.double(forKey: "maxSessionOverride")
         return override > 0 ? override : 4 * 3600
     }
-    static let minFreeBytes: Int64 = 5 * 1_073_741_824   // pause below 5 GB
+    static var minFreeBytes: Int64 {   // pause ambient below this many GB free
+        let gb = UserDefaults.standard.double(forKey: "ambientMinFreeGB")
+        return Int64((gb > 0 ? gb : 5) * 1_073_741_824)
+    }
 
     enum Rollover: Equatable {
         case none

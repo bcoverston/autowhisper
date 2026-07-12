@@ -24,7 +24,7 @@ struct StatusStrip: View {
                 LevelMeter(label: "sys", level: app.systemLevel)
                 Spacer()
                 if let live = app.live {
-                    Text(counters(live))
+                    Text("\(live.chunksClosed) chunks · \(live.segments.count) segments")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -38,6 +38,9 @@ struct StatusStrip: View {
                                 text: "Microphone — \(app.micDeviceName ?? "…")\(app.micActive ? "" : " (off)")")
                     Spacer()
                 }
+            }
+            if let live = app.live, live.windowsCut > 0 {
+                pipelineRow(live)
             }
             ForEach(app.issues) { issue in
                 HStack {
@@ -96,20 +99,68 @@ struct StatusStrip: View {
         }
     }
 
-    private func counters(_ live: LiveSession) -> String {
-        var parts = ["\(live.chunksClosed) chunks"]
-        if live.windowsCut > 0 {
-            parts.append("\(live.segments.count) segments")
-            if live.backlog > 0 { parts.append("backlog \(live.backlog)") }
-            if live.recheckPending > 0 { parts.append("\(live.recheckPending) re-checks pending") }
+    /// Visualizes how far each pipeline stage is behind the audio: the whisper
+    /// transcription backlog (windows cut vs transcribed) and the re-check queue
+    /// (flagged segments vs re-checked). Bars go green when a stage is caught up.
+    private func pipelineRow(_ live: LiveSession) -> some View {
+        HStack(spacing: 16) {
+            PipelineGauge(label: "transcribe", done: live.windowsTranscribed,
+                          total: live.windowsCut, behind: live.backlog)
+            if live.flagged > 0 {
+                PipelineGauge(label: "re-check", done: live.recheckedIDs.count,
+                              total: live.flagged, behind: live.recheckPending)
+            }
+            Spacer()
+            correctionStatus(live)
         }
+    }
+
+    @ViewBuilder private func correctionStatus(_ live: LiveSession) -> some View {
         switch live.correctionState {
-        case .idle, .done: break
+        case .idle, .done: EmptyView()
         case .batching(let nextAt):
-            parts.append("next batch \(nextAt.formatted(date: .omitted, time: .standard))")
-        case .running: parts.append("correcting…")
-        case .failed: parts.append("correction failed")
+            Label("next batch \(nextAt.formatted(date: .omitted, time: .standard))",
+                  systemImage: "hourglass")
+                .font(.caption2).foregroundStyle(.secondary).labelStyle(.titleAndIcon)
+        case .running:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.mini)
+                Text("correcting…").font(.caption2).foregroundStyle(.secondary)
+            }
+        case .failed:
+            Label("correction failed", systemImage: "exclamationmark.triangle")
+                .font(.caption2).foregroundStyle(.orange)
         }
-        return parts.joined(separator: " · ")
+    }
+}
+
+/// A labeled capsule gauge (matching `LevelMeter`) for a draining work queue:
+/// fills toward green as `done` approaches `total`; amber while `behind` > 0.
+struct PipelineGauge: View {
+    let label: String
+    let done: Int
+    let total: Int
+    let behind: Int
+
+    private var fraction: CGFloat {
+        total > 0 ? CGFloat(done) / CGFloat(total) : 1
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule()
+                        .fill(behind > 0 ? Color.orange : .green)
+                        .frame(width: geo.size.width * min(1, fraction))
+                }
+            }
+            .frame(width: 60, height: 6)
+            Text(behind > 0 ? "\(behind) behind" : "\(done)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
     }
 }

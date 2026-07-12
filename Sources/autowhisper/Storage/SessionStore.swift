@@ -1,6 +1,12 @@
 import Events
 import Foundation
 
+/// Aggregate speech statistics for one speaker label across sessions.
+struct SpeakerUsage: Sendable {
+    var sessions = 0
+    var seconds = 0.0
+}
+
 /// Session directories, session.json lifecycle, and artifact listing.
 /// All functions are synchronous file I/O — call from off the main actor.
 enum SessionStore {
@@ -131,6 +137,24 @@ enum SessionStore {
             }
         }
         return hits
+    }
+
+    /// Per-speaker-label usage across all sessions: how many sessions the label
+    /// appears in and total attributed speech time. Derived from the transcripts
+    /// on disk (no separate bookkeeping), so it reflects corrections immediately.
+    static func speakerUsage() -> [String: SpeakerUsage] {
+        var out: [String: SpeakerUsage] = [:]
+        for summary in listSessions() {
+            var seen = Set<String>()
+            for seg in loadDraftSegments(dir: summary.dir) {
+                guard let name = seg.speaker else { continue }
+                var u = out[name] ?? SpeakerUsage()
+                u.seconds += Double(seg.t1_ms - seg.t0_ms) / 1000
+                if seen.insert(name).inserted { u.sessions += 1 }
+                out[name] = u
+            }
+        }
+        return out
     }
 
     static func loadSpeakerEmbeddings(dir: URL) -> [String: [Float]] {

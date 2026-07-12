@@ -9,6 +9,8 @@ struct SessionSidebar: View {
     @State private var filter = ""
     @State private var matchingIDs: Set<String>?     // nil = no filter active
     @State private var pendingDelete: SessionSummary?
+    @State private var pendingRename: SessionSummary?
+    @State private var renameText = ""
 
     private var groups: [(day: Date, sessions: [SessionSummary])] {
         let past = app.summaries.filter { summary in
@@ -86,6 +88,18 @@ struct SessionSidebar: View {
         } message: {
             Text("Permanently removes \(pendingDelete?.title ?? pendingDelete?.id ?? "") — audio chunks and all transcript files.")
         }
+        .alert("Rename session", isPresented: .init(
+            get: { pendingRename != nil }, set: { if !$0 { pendingRename = nil } })) {
+            TextField("Title", text: $renameText)
+            Button("Save") {
+                let title = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let pendingRename, !title.isEmpty {
+                    app.renameSession(pendingRename, to: title)
+                }
+                pendingRename = nil
+            }
+            Button("Cancel", role: .cancel) { pendingRename = nil }
+        }
     }
 
     @ViewBuilder
@@ -94,6 +108,10 @@ struct SessionSidebar: View {
             row(summary)
                 .tag(summary.id)
                 .contextMenu {
+                    Button("Rename…") {
+                        renameText = summary.title ?? ""
+                        pendingRename = summary
+                    }
                     Button("Reveal in Finder") {
                         NSWorkspace.shared.activateFileViewerSelecting([summary.dir])
                     }

@@ -11,6 +11,9 @@ struct VoiceProfile: Codable, Identifiable, Sendable, Equatable {
     var colorIndex: Int
     var createdAt: Date
     var updatedAt: Date
+    var misidentifiedCount: Int?   // times the user flagged an auto-match as wrong (nil in older profiles)
+
+    var misIDs: Int { misidentifiedCount ?? 0 }
 }
 
 /// On-disk store of enrolled voice profiles + cross-session matching.
@@ -22,11 +25,21 @@ actor SpeakerStore {
     /// Cross-session match gate (from the design/proposal): accept a profile
     /// only if cosine similarity ≥ matchThreshold AND it beats the runner-up by
     /// ≥ matchMargin — the margin is what stops two similar voices merging.
+    /// Default biases toward leaving a voice as "Speaker N" over mislabeling it:
+    /// an unlabeled speaker is a one-click tag, a wrong label must be noticed and
+    /// corrected. Kept strict until real-world data lets us dial in a fixed value.
+    static let defaultMatchThreshold: Float = 0.65
     static var matchThreshold: Float {
         let v = UserDefaults.standard.double(forKey: "sameVoiceThreshold")
-        return v > 0 ? Float(v) : 0.55
+        return v > 0 ? Float(v) : defaultMatchThreshold
     }
-    static let matchMargin: Float = 0.06
+    /// The best profile must beat the runner-up by at least this cosine margin —
+    /// the guard against merging two similar voices. User-tunable (Settings).
+    static let defaultMatchMargin: Float = 0.06
+    static var matchMargin: Float {
+        let v = UserDefaults.standard.double(forKey: "voiceMatchMargin")
+        return v > 0 ? Float(v) : defaultMatchMargin
+    }
 
     private let url = SessionStore.root.appending(path: "speakers.json")
     private var profiles: [VoiceProfile] = []
@@ -91,10 +104,24 @@ actor SpeakerStore {
         var e = embedding
         SpeakerStore.normalize(&e)
         let p = VoiceProfile(id: UUID(), displayName: name, centroid: e, sampleCount: addingSamples,
-                             colorIndex: profiles.count, createdAt: .now, updatedAt: .now)
+                             colorIndex: profiles.count, createdAt: .now, updatedAt: .now,
+                             misidentifiedCount: 0)
         profiles.append(p)
         save()
         return p
+    }
+
+    /// Record that the cross-session matcher wrongly labeled someone with this
+    /// profile's name — the accuracy signal for deciding whether to tighten the
+    /// threshold. No-ops if the name isn't enrolled (e.g. a raw "Speaker N").
+    func markMisidentified(name: String) {
+        loadIfNeeded()
+        guard let idx = profiles.firstIndex(where: {
+            $0.displayName.caseInsensitiveCompare(name) == .orderedSame
+        }) else { return }
+        profiles[idx].misidentifiedCount = profiles[idx].misIDs + 1
+        profiles[idx].updatedAt = .now
+        save()
     }
 
     func forget(_ id: UUID) {

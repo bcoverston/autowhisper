@@ -1,66 +1,11 @@
 import Foundation
 
-/// Headless `claude -p` wrapper: payload JSON on stdin, structured output back.
-/// Runs with all tools disabled and no session persistence; cwd is the app
-/// support dir so no project CLAUDE.md leaks into the prompt.
-enum ClaudeCLI {
-    static let prompt = """
-    Correct this speech-to-text draft transcript. Each segment has a confidence \
-    score (avg_p) and a no-speech probability; low-confidence segments may include \
-    alt_hypothesis from a more accurate model — use it to arbitrate what was said. \
-    Some segments carry a speaker label; use it as dialog context to keep \
-    attribution coherent, but do not change speakers. Fix mis-transcriptions, \
-    casing, and punctuation only; never paraphrase, summarize, or merge segments. \
-    Return every segment with its final text.
-    """
-
-    static let schema = """
-    {"type":"object","additionalProperties":false,"required":["segments"],\
-    "properties":{"segments":{"type":"array","items":{"type":"object",\
-    "additionalProperties":false,"required":["id","text"],"properties":\
-    {"id":{"type":"integer"},"text":{"type":"string"}}}}}}
-    """
-
-    struct Payload: Encodable {
-        struct Segment: Encodable {
-            let id: Int
-            let t0: Int
-            let t1: Int
-            let text: String
-            let avg_p: Float
-            let no_speech_prob: Float
-            let alt_hypothesis: String?
-            let speaker: String?
-        }
-        let segments: [Segment]
-    }
-
-    private struct Response: Decodable {
-        struct Structured: Decodable {
-            struct Segment: Decodable {
-                let id: Int
-                let text: String
-            }
-            let segments: [Segment]
-        }
-        let is_error: Bool
-        let structured_output: Structured?
-        let result: String?
-    }
-
-    enum CLIError: Error, LocalizedError {
-        case notFound
-        case timeout
-        case failed(String)
-
-        var errorDescription: String? {
-            switch self {
-            case .notFound: "claude CLI not found"
-            case .timeout: "claude timed out"
-            case .failed(let detail): detail
-            }
-        }
-    }
+/// Backend that shells out to a local `claude -p` (the user's subscription).
+/// Payload JSON on stdin, structured output back. Runs with all tools disabled
+/// and no session persistence; cwd is the app-support dir so no project
+/// CLAUDE.md leaks into the prompt.
+struct CLIBackend: LLMBackend {
+    let model: String
 
     static func locate() -> URL? {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -69,19 +14,8 @@ enum ClaudeCLI {
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
 
-    /// Returns segment id → corrected text.
-    static func correct(_ payload: Payload, timeout: Duration = .seconds(180)) async throws -> [Int: String] {
-        let stdin = try JSONEncoder().encode(payload)
-        let structured = try await invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: timeout)
-        let decoded = try JSONDecoder().decode(Response.Structured.self, from: structured)
-        return Dictionary(uniqueKeysWithValues: decoded.segments.map { ($0.id, $0.text) })
-    }
-
-    /// Runs `claude -p` headless with all tools off and a JSON schema, returning
-    /// the raw `structured_output` JSON. Shared by correction and summarization.
-    static func invoke(prompt: String, schema: String, stdin: Data,
-                       timeout: Duration = .seconds(180)) async throws -> Data {
-        guard let cli = locate() else { throw CLIError.notFound }
+    func structured(prompt: String, schema: String, input: Data, timeout: Duration) async throws -> Data {
+        guard let cli = Self.locate() else { throw LLMError.notFound }
 
         let process = Process()
         process.executableURL = cli
@@ -90,7 +24,7 @@ enum ClaudeCLI {
             "--tools", "",
             "--no-session-persistence",
             "--setting-sources", "",
-            "--model", "sonnet",
+            "--model", model,
             "--output-format", "json",
             "--json-schema", schema,
         ]
@@ -108,7 +42,7 @@ enum ClaudeCLI {
                     }
                     do {
                         try process.run()
-                        inPipe.fileHandleForWriting.write(stdin)
+                        inPipe.fileHandleForWriting.write(input)
                         try? inPipe.fileHandleForWriting.close()
                     } catch {
                         process.terminationHandler = nil
@@ -119,21 +53,21 @@ enum ClaudeCLI {
             group.addTask {
                 try await Task.sleep(for: timeout)
                 process.terminate()
-                throw CLIError.timeout
+                throw LLMError.timeout
             }
             defer { group.cancelAll() }
-            guard let first = try await group.next() else { throw CLIError.timeout }
+            guard let first = try await group.next() else { throw LLMError.timeout }
             return first
         }
 
         guard process.terminationStatus == 0 else {
             let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            throw CLIError.failed("exit \(process.terminationStatus): \(stderr.prefix(200))")
+            throw LLMError.failed("claude exit \(process.terminationStatus): \(stderr.prefix(200))")
         }
         struct Envelope: Decodable { let is_error: Bool; let structured_output: JSONAny?; let result: String? }
         let env = try JSONDecoder().decode(Envelope.self, from: data)
         guard !env.is_error, let structured = env.structured_output else {
-            throw CLIError.failed("claude error: \((env.result ?? "no structured output").prefix(200))")
+            throw LLMError.failed("claude error: \((env.result ?? "no structured output").prefix(200))")
         }
         return try JSONEncoder().encode(structured)
     }

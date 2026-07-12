@@ -36,7 +36,7 @@ enum Summarizer {
 
     static func summarize(transcript: String) async throws -> SessionSummaryDoc {
         let stdin = try JSONEncoder().encode(["transcript": transcript])
-        let data = try await ClaudeCLI.invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: .seconds(120))
+        let data = try await LLM.invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: .seconds(120))
         let raw = try JSONDecoder().decode(Raw.self, from: data)
         return SessionSummaryDoc(title: raw.title, summary: raw.summary,
                                  actionItems: raw.action_items, topics: raw.topics)
@@ -55,7 +55,7 @@ enum Summarizer {
         digest: a short overview, then the notable threads and any outstanding \
         action items across sessions. Base it only on the provided summaries.
         """
-        let data = try await ClaudeCLI.invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: .seconds(120))
+        let data = try await LLM.invoke(prompt: prompt, schema: schema, stdin: stdin, timeout: .seconds(120))
         struct D: Decodable { let digest: String }
         return try JSONDecoder().decode(D.self, from: data).digest
     }

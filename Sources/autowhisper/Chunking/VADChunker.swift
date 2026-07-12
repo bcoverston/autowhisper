@@ -16,7 +16,7 @@ actor VADChunker {
     private let hub: EventHub
     private let draftLog: JSONLWriter
     private let orchestrator: CorrectionOrchestrator
-    private let attributor = SpeakerAttributor()
+    private let attributor: SpeakerAttributor
     private var vad: OpaquePointer?
     private var pending: [Float] = []
     private var baseSample = 0                        // session-absolute offset of pending[0]
@@ -30,6 +30,7 @@ actor VADChunker {
         self.sessionDir = sessionDir
         self.draftLog = JSONLWriter(url: sessionDir.appending(path: "draft.jsonl"))
         self.orchestrator = orchestrator
+        self.attributor = SpeakerAttributor(session: sessionDir.lastPathComponent)
     }
 
     func run(_ stream: AsyncStream<[Float]>) async {
